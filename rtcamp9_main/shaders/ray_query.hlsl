@@ -374,7 +374,7 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     { // Do accumulation over time
         float a = 1.0F / float(pushConst.frame + 1);
         float3 old_color = outImage[int2(launchID)].xyz;
-        outImage[int2(launchID)] = float4(lerp(old_color, pixel_color, a), 1.0F);
+        outImage[int2(launchID)] = float4(lerp(old_color, pixel_color, a) + float3(1.0f, 0.0f, 0.0f), 1.0F);
     }
 }
 

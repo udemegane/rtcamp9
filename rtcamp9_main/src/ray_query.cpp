@@ -146,8 +146,7 @@ public:
       {
         if (ImGui::Button("Reload Shaders"))
         {
-          createCompPipelines();
-          // compile
+          m_shaderCompile = true;
         }
       }
 
@@ -208,6 +207,11 @@ public:
     if (!updateFrame())
     {
       return;
+    }
+    if (m_shaderCompile)
+    {
+      m_shaderCompile = false;
+      reloadPipeline();
     }
 
     float view_aspect_ratio = m_viewSize.x / m_viewSize.y;
@@ -465,6 +469,27 @@ private:
     m_rtBuilder.buildTlas(tlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
   }
 
+  void reloadPipeline()
+  {
+    auto spirvCode = m_compiler->compile(L"ray_query.hlsl", L"computeMain");
+    VkPipelineShaderStageCreateInfo stageInfo{
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = nvvk::createShaderModule(m_device,
+                                           static_cast<const uint32_t *>(spirvCode->GetBufferPointer()), spirvCode->GetBufferSize()),
+        .pName = "computeMain",
+    };
+
+    VkComputePipelineCreateInfo cpCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = stageInfo,
+        .layout = m_rtPipe.layout,
+    };
+
+    vkCreateComputePipelines(m_device, {}, 1, &cpCreateInfo, nullptr, &m_rtPipe.plines[0]);
+
+    vkDestroyShaderModule(m_device, cpCreateInfo.stage.module, nullptr);
+  }
   //--------------------------------------------------------------------------------------------------
   // Creating the pipeline: shader ...
   //
@@ -493,23 +518,7 @@ private:
     };
     vkCreatePipelineLayout(m_device, &plCreateInfo, nullptr, &m_rtPipe.layout);
 
-    auto spirvCode = m_compiler->compile(L"ray_query.hlsl", L"computeMain");
-    VkPipelineShaderStageCreateInfo stageInfo{
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .module = nvvk::createShaderModule(m_device,
-                                           static_cast<const uint32_t *>(spirvCode->GetBufferPointer()), spirvCode->GetBufferSize()),
-        .pName = "computeMain",
-    };
-
-    VkComputePipelineCreateInfo cpCreateInfo{
-        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .stage = nvvk::createShaderStageInfo(m_device, comp_shd, VK_SHADER_STAGE_COMPUTE_BIT, USE_HLSL ? "computeMain" : "main"),
-        .layout = m_rtPipe.layout,
-    };
-
-    vkCreateComputePipelines(m_device, {}, 1, &cpCreateInfo, nullptr, &m_rtPipe.plines[0]);
-
-    vkDestroyShaderModule(m_device, cpCreateInfo.stage.module, nullptr);
+    reloadPipeline();
   }
 
   // std::tuple<bool, std::string> compileShaders()
@@ -648,6 +657,8 @@ private:
   nvvk::SBTWrapper m_sbt; // Shading binding table wrapper
   nvvk::RaytracingBuilderKHR m_rtBuilder;
   nvvkhl::PipelineContainer m_rtPipe;
+
+  bool m_shaderCompile = false;
 };
 
 //////////////////////////////////////////////////////////////////////////

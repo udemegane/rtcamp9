@@ -108,6 +108,7 @@ HLSLShaderCompiler::HLSLShaderCompiler(const wchar_t *profile)
 
 CComPtr<IDxcBlob> HLSLShaderCompiler::compile(std::wstring filename, std::wstring entryname)
 {
+    _incHandler->clearIncludeSet();
     HRESULT hres;
     auto currentDir = std::filesystem::current_path();
     std::filesystem::path shaderDirectory = currentDir / "shaders";

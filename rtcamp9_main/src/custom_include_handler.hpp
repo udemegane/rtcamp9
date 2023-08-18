@@ -45,6 +45,9 @@ public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, _COM_Outptr_ void __RPC_FAR *__RPC_FAR *ppvObject) override { return E_NOINTERFACE; }
     ULONG STDMETHODCALLTYPE AddRef(void) override { return 0; }
     ULONG STDMETHODCALLTYPE Release(void) override { return 0; }
+    void clearIncludeSet() { IncludedFiles.clear(); }
+
+private:
     CComPtr<IDxcUtils> pUtils;
     std::unordered_set<std::string> IncludedFiles;
 };
