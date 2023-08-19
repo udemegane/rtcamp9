@@ -31,7 +31,7 @@ public:
         data.radiance = vec3(0.0f);
 
         std::vector<DIReservoir>
-            r_info(size.height * size.width, data);
+            r_info(size.height * size.width * 1.332, data);
         auto buffer = m_alloc->createBuffer(cmd, r_info, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
         m_size = r_info.size();
         m_dutil->DBG_NAME(buffer.buffer);
