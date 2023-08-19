@@ -21,6 +21,7 @@
 
 #include "device_host.h"
 #include "dh_bindings.h"
+#include "di_reservoir.hlsl"
 
 #include "constants.hlsli"
 #include "ggx.hlsli"
@@ -55,8 +56,8 @@ RWTexture2D<float4> outImage;
 ConstantBuffer<FrameInfo> frameInfo;
 [[vk::binding(B_sceneDesc)]]
 StructuredBuffer<SceneDescription> sceneDesc;
-// [[vk::binding(B_outBuffer)]]
-// RWStructuredBuffer<RadianceInfo> dummy;
+[[vk::binding(B_outBuffer)]]
+RWStructuredBuffer<DIReservoir> diReservoir;
 
 //-----------------------------------------------------------------------
 // Payload
@@ -345,13 +346,13 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize)
 [numthreads(WORKGROUP_SIZE, WORKGROUP_SIZE, 1)]
 void computeMain(uint3 threadIdx: SV_DispatchThreadID)
 {
-    float2 launchID = (float2)threadIdx.xy;
+    uint2 launchID = threadIdx.xy;
 
     uint2 imgSize;
     outImage.GetDimensions(imgSize.x, imgSize.y); // DispatchRaysDimensions();
-    float2 launchSize = imgSize;
-
-    if (launchID.x >= launchSize.x || launchID.y >= launchSize.y)
+    // float2 launchSize = imgSize;
+    uint pixel1d = launchID.x + imgSize.x * launchID.y;
+    if (launchID.x >= imgSize.x || launchID.y >= imgSize.y)
         return;
 
     // Initialize the random number
@@ -361,20 +362,21 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     float3 pixel_color = float3(0.0F, 0.0F, 0.0F);
     for (int s = 0; s < pushConst.maxSamples; s++)
     {
-        pixel_color += samplePixel(seed, launchID, launchSize);
+        pixel_color += samplePixel(seed, launchID, (float2)imgSize);
     }
     pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result
     if (true)
     { // First frame, replace the value in the buffer
-        outImage[int2(launchID)] = float4(pixel_color, 1.0);
+        diReservoir[pixel1d].radiance = pixel_color;
+        outImage[int2(launchID)] = float4(pixel_color + float3(0.5f, 0.0f, 0.0f), 1.0);
     }
     else
     { // Do accumulation over time
         float a = 1.0F / float(pushConst.frame + 1);
         float3 old_color = outImage[int2(launchID)].xyz;
-        outImage[int2(launchID)] = float4(lerp(old_color, pixel_color, a) + float3(1.0f, 0.0f, 0.0f), 1.0F);
+        outImage[int2(launchID)] = float4(lerp(old_color, pixel_color, a), 1.0F);
     }
 }
 

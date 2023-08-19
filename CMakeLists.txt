@@ -23,7 +23,11 @@ SET(SAMPLE_FOLDER ${CMAKE_CURRENT_SOURCE_DIR}/${PROJECT_NAME})
 file(GLOB SOURCE_FILES
     ${SAMPLE_FOLDER}/src/*.cpp
     ${SAMPLE_FOLDER}/src/*.hpp
-    ${SAMPLE_FOLDER}/src/*.h)
+    ${SAMPLE_FOLDER}/src/*.h
+    ${SAMPLE_FOLDER}/shaders/*.hlsl
+    ${SAMPLE_FOLDER}/shaders/*.hlsli
+    ${SAMPLE_FOLDER}/shaders/*.h
+)
 target_sources(${PROJECT_NAME} PRIVATE ${SOURCE_FILES})
 target_sources(${PROJECT_NAME} PRIVATE ${COMMON_SOURCE_FILES}) # Extra source from nvpro-core based on options
 target_sources(${PROJECT_NAME} PRIVATE ${PACKAGE_SOURCE_FILES}) # Extra source from nvpro-core based on options
@@ -110,9 +114,9 @@ if(USE_SLANG)
 endif()
 
 add_subdirectory(third_party)
+set(THIRDPARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 if(USE_HLSL_RUNTIME)
-    set(THIRDPARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
     set(DXC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc)
     add_library(dxc SHARED IMPORTED GLOBAL)
     set_target_properties(dxc PROPERTIES
@@ -122,7 +126,7 @@ if(USE_HLSL_RUNTIME)
     )
 
     function(finalize_dxc_dependency thirdparty_root)
-        message("-- copy dxc dependencies")
+        # message("-- copy dxc dependencies")
         set(DXC_DIR ${thirdparty_root}/dxc)
         file(GLOB DXC_BIN LIST_DIRECTORIES false "${DXC_DIR}/bin/*" "${DXC_DIR}/lib/*")
 
@@ -141,8 +145,6 @@ if(USE_HLSL_RUNTIME)
 
     function(copy_shaders shaders_dir)
         file(GLOB_RECURSE DXC_FILES "${shaders_dir}/*")
-        set(conf $<CONFIG>)
-        message("test ${conf}")
 
         add_custom_command(
             TARGET ${PROJECT_NAME} PRE_BUILD
@@ -153,8 +155,8 @@ if(USE_HLSL_RUNTIME)
         foreach(file ${DXC_FILES})
             if(${file} MATCHES ${SHADER_EXTENSION_REGEX})
                 add_custom_command(
-                    TARGET ${PROJECT_NAME} POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file} $<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders
+                    TARGET ${PROJECT_NAME} PRE_LINK
+                    COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file} $<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders
                     COMMENT "Copying shader to ${file}"
                 )
             endif()
@@ -168,7 +170,6 @@ if(USE_HLSL_RUNTIME)
 endif()
 
 if(USE_SLANG_RUNTIME)
-    set(THIRDPARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
     set(SLANG_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/slang)
     add_library(slang SHARED IMPORTED GLOBAL)
     set_target_properties(slang PROPERTIES
@@ -179,7 +180,7 @@ if(USE_SLANG_RUNTIME)
     file(GLOB SLANG_BIN LIST_DIRECTORIES false "${SLANG_DIR}/bin/windows-x64/release/*.dll" "${SLANG_DIR}/bin/windows-x64/release/*.lib")
 
     function(finalize_slang_dependency thirdparty_root)
-        message("-- copy slang dependencies")
+        # message("-- Copy slang dependencies")
         set(SLANG_DIR ${thirdparty_root}/slang)
         file(GLOB SLANG_BIN LIST_DIRECTORIES false "${SLANG_DIR}/bin/windows-x64/release/*.dll" "${SLANG_DIR}/bin/windows-x64/release/*.lib")
 
@@ -198,8 +199,6 @@ if(USE_SLANG_RUNTIME)
 
     function(copy_shaders shaders_dir)
         file(GLOB_RECURSE SLANG_FILES "${shaders_dir}/*")
-        set(conf $<CONFIG>)
-        message("test ${conf}")
 
         add_custom_command(
             TARGET ${PROJECT_NAME} PRE_BUILD

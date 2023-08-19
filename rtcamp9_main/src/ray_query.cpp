@@ -49,11 +49,13 @@
 #include "nvvkhl/gbuffer.hpp"
 #include "nvvkhl/pipeline_container.hpp"
 #include "nvvkhl/tonemap_postprocess.hpp"
+#include "visualize_reservoir.hpp"
 
 #include "shaders/dh_bindings.h"
 #include "shaders/device_host.h"
 #include "nvvkhl/shaders/dh_sky.h"
 #include "shader_compiler.hpp"
+#include "reservoirs.hpp"
 
 #if USE_HLSL
 #include "_autogen/ray_query_computeMain.spirv.h"
@@ -67,6 +69,7 @@ const auto &comp_shd = std::vector<uint32_t>{std::begin(ray_query_comp), std::en
 #endif
 #include "nvvk/specialization.hpp"
 #include "nvvk/images_vk.hpp"
+#include "nvvk/buffers_vk.hpp"
 
 #define GROUP_SIZE 16 // Same group size as in compute shader
 
@@ -94,6 +97,10 @@ public:
     m_alloc = std::make_unique<nvvkhl::AllocVma>(m_app->getContext().get()); // Allocator
     m_rtSet = std::make_unique<nvvk::DescriptorSetContainer>(m_device);
     m_tonemapper = std::make_unique<nvvkhl::TonemapperPostProcess>(m_app->getContext().get(), m_alloc.get());
+    // m_resVisualizer = std::make_unique<VisualizeReservoir>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
+
+    // prepare structured buffers
+    m_diResContainer = std::make_unique<DIReservoirContainer>(m_dutil.get(), m_alloc.get());
 
     // Requesting ray tracing properties
     VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -117,6 +124,8 @@ public:
 #endif
 
     m_tonemapper->createComputePipeline();
+    // m_resVisualizer->createPipelineLayout();
+    // m_resVisualizer->createComputePipeline();
   }
 
   void onDetach() override
@@ -127,11 +136,16 @@ public:
 
   void onResize(uint32_t width, uint32_t height) override
   {
-    std::cout << "Call check\n";
+    auto cmd = m_app->createTempCmdBuffer();
+    auto size = VkExtent2D{static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
     createGbuffers({width, height});
+    cmd = m_diResContainer->createReservoir(cmd, size);
+    // m_resVisualizer->updateComputeDescriptorSets(m_diResContainer->getReservoir(),
+    //                                              m_gBuffers->getDescriptorImageInfo(eImgRendered));
     m_tonemapper->updateComputeDescriptorSets(m_gBuffers->getDescriptorImageInfo(eImgRendered),
                                               m_gBuffers->getDescriptorImageInfo(eImgTonemapped));
     resetFrame();
+    m_app->submitAndWaitTempCmdBuffer(cmd);
   }
 
   void onUIRender() override
@@ -250,6 +264,26 @@ public:
 
     const auto &size = m_app->getViewportSize();
     vkCmdDispatch(cmd, (size.width + (GROUP_SIZE - 1)) / GROUP_SIZE, (size.height + (GROUP_SIZE - 1)) / GROUP_SIZE, 1);
+
+    // VkBufferMemoryBarrier2KHR buffer_barrier{};
+    // buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+    // buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+    // buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+    // buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+    // buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+    // buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    // buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    // buffer_barrier.buffer = m_diResContainer->getReservoir().buffer;
+    // buffer_barrier.size = m_diResContainer->getBufferSize();
+
+    // VkDependencyInfoKHR dep_info{};
+    // dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+    // dep_info.bufferMemoryBarrierCount = 1;
+    // dep_info.pBufferMemoryBarriers = &buffer_barrier;
+
+    // vkCmdPipelineBarrier2KHR(cmd, &dep_info);
+
+    // m_resVisualizer->runCompute(cmd, size);
 
     // Making sure the rendered image is ready to be used
     auto image_memory_barrier =
@@ -503,6 +537,7 @@ private:
     // This descriptor set, holds the top level acceleration structure and the output image
     m_rtSet->addBinding(B_tlas, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL);
     m_rtSet->addBinding(B_outImage, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_ALL);
+    m_rtSet->addBinding(B_outBuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
     m_rtSet->addBinding(B_frameInfo, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL);
     m_rtSet->addBinding(B_sceneDesc, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL);
     m_rtSet->initLayout(VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
@@ -521,17 +556,8 @@ private:
     reloadPipeline();
   }
 
-  // std::tuple<bool, std::string> compileShaders()
-  // {
-  //   nvvkhl::Application::submitResourceFree([]()
-  //                                           { vkDestroyShaderModule();
-  //                                           vkDestroyPipeline(); });
-  //   createCompPipelines();
-  // }
-
   void pushDescriptorSet(VkCommandBuffer cmd)
   {
-    float a;
     // Write to descriptors
     VkAccelerationStructureKHR tlas = m_rtBuilder.getAccelerationStructure();
     VkWriteDescriptorSetAccelerationStructureKHR descASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
@@ -540,10 +566,11 @@ private:
     VkDescriptorImageInfo imageInfo{{}, m_gBuffers->getColorImageView(eImgRendered), VK_IMAGE_LAYOUT_GENERAL};
     VkDescriptorBufferInfo dbi_unif{m_bFrameInfo.buffer, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo sceneDesc{m_bSceneDesc.buffer, 0, VK_WHOLE_SIZE};
-
+    auto bufInfo = m_diResContainer->getReservoir();
     std::vector<VkWriteDescriptorSet> writes;
     writes.emplace_back(m_rtSet->makeWrite(0, B_tlas, &descASInfo));
     writes.emplace_back(m_rtSet->makeWrite(0, B_outImage, &imageInfo));
+    writes.emplace_back(m_rtSet->makeWrite(0, B_outBuffer, &bufInfo));
     writes.emplace_back(m_rtSet->makeWrite(0, B_frameInfo, &dbi_unif));
     writes.emplace_back(m_rtSet->makeWrite(0, B_sceneDesc, &sceneDesc));
 
@@ -617,6 +644,7 @@ private:
   std::unique_ptr<nvvk::DebugUtil> m_dutil;
   std::unique_ptr<nvvkhl::AllocVma> m_alloc;
   std::unique_ptr<nvvk::DescriptorSetContainer> m_rtSet; // Descriptor set
+  std::unique_ptr<VisualizeReservoir> m_resVisualizer;
   std::unique_ptr<nvvkhl::TonemapperPostProcess> m_tonemapper;
 
   nvmath::vec2f m_viewSize = {1, 1};
@@ -645,6 +673,9 @@ private:
   Light m_light;
 
   VkShaderModule m_initTraceModule = VK_NULL_HANDLE;
+
+  // structuredbuffers
+  std::unique_ptr<DIReservoirContainer> m_diResContainer;
 
   // Pipeline
   PushConstant m_pushConst{};                         // Information sent to the shader

@@ -2,16 +2,8 @@
 
 #include "visualize_reservoir.hpp"
 
-#if USE_HLSL
-#include "_autogen/ray_query_computeMain.spirv.h"
-const auto &comp = std::vector<char>{std::begin(ray_query_computeMain), std::end(ray_query_computeMain)};
-#elif USE_SLANG
-#include "_autogen/ray_query_computeMain.spirv.h"
-const auto &comp = std::vector<uint32_t>{std::begin(ray_query_computeMain), std::end(ray_query_computeMain)};
-#endif
-
-VisualizeReservoir::VisualizeReservoir(nvvk::Context *ctx, nvvkhl::AllocVma *alloc)
-    : m_ctx(ctx), m_dutil(std::make_unique<nvvk::DebugUtil>(ctx->m_device)), m_dset(std::make_unique<nvvk::DescriptorSetContainer>(ctx->m_device))
+VisualizeReservoir::VisualizeReservoir(nvvk::Context *ctx, nvvkhl::AllocVma *alloc, HLSLShaderCompiler *compiler)
+    : m_ctx(ctx), m_dutil(std::make_unique<nvvk::DebugUtil>(ctx->m_device)), m_dset(std::make_unique<nvvk::DescriptorSetContainer>(ctx->m_device)), m_compiler(compiler)
 {
   m_pushConst.dummy = 0;
 }
@@ -22,7 +14,7 @@ VisualizeReservoir::~VisualizeReservoir()
   m_dset->deinit();
 }
 
-void VisualizeReservoir::createComputePipeline()
+void VisualizeReservoir::createPipelineLayout()
 {
   nvvk::DebugUtil dbg(m_ctx->m_device);
   m_dset->addBinding(eDebugPassInput, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
@@ -33,11 +25,19 @@ void VisualizeReservoir::createComputePipeline()
   VkPushConstantRange push_constant = {VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DBGConstant)};
   m_dset->initPipeLayout(1, &push_constant);
   m_dutil->DBG_NAME(m_dset->getPipeLayout());
+}
 
-  VkPipelineShaderStageCreateInfo stage_info{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
-  stage_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-  stage_info.module = nvvk::createShaderModule(m_ctx->m_device, comp.data(), sizeof(comp.data()));
-  stage_info.pName = "main";
+void VisualizeReservoir::createComputePipeline()
+{
+  auto spirvCode = m_compiler->compile(L"debug_reservoir.hlsl", L"main");
+
+  VkPipelineShaderStageCreateInfo stage_info{
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+      .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+      .module = nvvk::createShaderModule(m_ctx->m_device,
+                                         static_cast<const uint32_t *>(spirvCode->GetBufferPointer()), spirvCode->GetBufferSize()),
+      .pName = "main",
+  };
 
   VkComputePipelineCreateInfo comp_info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
   comp_info.layout = m_dset->getPipeLayout();

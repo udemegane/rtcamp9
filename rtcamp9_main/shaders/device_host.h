@@ -64,11 +64,6 @@ struct FrameInfo
   vec3 camPos;
 };
 
-struct RadianceInfo
-{
-  vec3 radiance;
-};
-
 struct Material
 {
   vec3 albedo;

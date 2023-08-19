@@ -21,13 +21,15 @@
 
 #include "nvvk/specialization.hpp"
 #include "nvvk/images_vk.hpp"
+#include "shader_compiler.hpp"
 
 class VisualizeReservoir
 {
 public:
-    VisualizeReservoir(nvvk::Context *ctx, nvvkhl::AllocVma *alloc);
+    VisualizeReservoir(nvvk::Context *ctx, nvvkhl::AllocVma *alloc, HLSLShaderCompiler *compiler);
     ~VisualizeReservoir();
 
+    void createPipelineLayout();
     void createComputePipeline();
     void updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorImageInfo outImage);
 
@@ -36,6 +38,7 @@ public:
     bool onUI();
 
 private:
+    HLSLShaderCompiler *m_compiler;
     nvvk::Context *m_ctx{nullptr};
     std::unique_ptr<nvvk::DebugUtil> m_dutil;
 

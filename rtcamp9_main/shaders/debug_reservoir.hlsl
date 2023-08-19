@@ -1,12 +1,12 @@
 #include "dh_vis_binding.h"
 
-#include "DIReservoir.hlsl"
 #include "constants.hlsli"
+#include "di_reservoir.hlsl"
 
 [[vk::push_constant]]
 ConstantBuffer<DBGConstant> pushConst;
 [[vk::binding(eDebugPassInput)]]
-RWStructuredBuffer<Reservoir> gRes;
+RWStructuredBuffer<DIReservoir> gRes;
 [[vk::binding(eDebugPassOutput)]]
 RWTexture2D<float4> gOutImage;
 
