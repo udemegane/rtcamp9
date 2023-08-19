@@ -218,6 +218,15 @@ public:
   {
     auto sdbg = m_dutil->DBG_SCOPE(cmd);
 
+    {
+      const int idx = 1;
+      m_nodes[idx].translation = vec3f(1.0f, 1.0f + sin(m_frame * (1.0f / 100.0f)), 1.0f);
+
+      VkAccelerationStructureInstanceKHR &tinst = m_tlas[idx];
+      tinst.transform = nvvk::toTransformMatrixKHR(m_nodes[idx].localMatrix());
+    }
+
+    m_rtBuilder.buildTlas(m_tlas, m_rtFrags, true);
     if (!updateFrame())
     {
       return;
@@ -280,7 +289,7 @@ public:
     dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
     dep_info.bufferMemoryBarrierCount = 1;
     dep_info.pBufferMemoryBarriers = &buffer_barrier;
-
+    // float a;
     vkCmdPipelineBarrier2KHR(cmd, &dep_info);
 
     m_resVisualizer->runCompute(cmd, size);
@@ -485,8 +494,7 @@ private:
   //
   void createTopLevelAS()
   {
-    std::vector<VkAccelerationStructureInstanceKHR> tlas;
-    tlas.reserve(m_nodes.size());
+    m_tlas.reserve(m_nodes.size());
     for (auto &node : m_nodes)
     {
       VkGeometryInstanceFlagsKHR flags{VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV};
@@ -498,9 +506,10 @@ private:
       rayInst.instanceShaderBindingTableRecordOffset = 0; // We will use the same hit group for all objects
       rayInst.flags = flags;
       rayInst.mask = 0xFF;
-      tlas.emplace_back(rayInst);
+      m_tlas.emplace_back(rayInst);
     }
-    m_rtBuilder.buildTlas(tlas, VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR);
+    m_rtFrags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    m_rtBuilder.buildTlas(m_tlas, m_rtFrags);
   }
 
   void reloadPipeline()
@@ -654,6 +663,8 @@ private:
   std::unique_ptr<nvvkhl::GBuffer> m_gBuffers;            // G-Buffers: color + depth
 
   // Resources
+  std::vector<VkAccelerationStructureInstanceKHR> m_tlas;
+  VkBuildAccelerationStructureFlagsKHR m_rtFrags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
   struct PrimitiveMeshVk
   {
     nvvk::Buffer vertices; // Buffer of the vertices
