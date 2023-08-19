@@ -370,7 +370,7 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     if (true)
     { // First frame, replace the value in the buffer
         diReservoir[pixel1d].radiance = pixel_color;
-        outImage[int2(launchID)] = float4(pixel_color + float3(0.5f, 0.0f, 0.0f), 1.0);
+        // outImage[int2(launchID)] = float4(pixel_color + float3(0.5f, 0.0f, 0.0f), 1.0);
     }
     else
     { // Do accumulation over time

@@ -97,7 +97,7 @@ public:
     m_alloc = std::make_unique<nvvkhl::AllocVma>(m_app->getContext().get()); // Allocator
     m_rtSet = std::make_unique<nvvk::DescriptorSetContainer>(m_device);
     m_tonemapper = std::make_unique<nvvkhl::TonemapperPostProcess>(m_app->getContext().get(), m_alloc.get());
-    // m_resVisualizer = std::make_unique<VisualizeReservoir>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
+    m_resVisualizer = std::make_unique<VisualizeReservoir>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
 
     // prepare structured buffers
     m_diResContainer = std::make_unique<DIReservoirContainer>(m_dutil.get(), m_alloc.get());
@@ -124,8 +124,8 @@ public:
 #endif
 
     m_tonemapper->createComputePipeline();
-    // m_resVisualizer->createPipelineLayout();
-    // m_resVisualizer->createComputePipeline();
+    m_resVisualizer->createPipelineLayout();
+    m_resVisualizer->createComputePipeline();
   }
 
   void onDetach() override
@@ -140,8 +140,8 @@ public:
     auto size = VkExtent2D{static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
     createGbuffers({width, height});
     cmd = m_diResContainer->createReservoir(cmd, size);
-    // m_resVisualizer->updateComputeDescriptorSets(m_diResContainer->getReservoir(),
-    //                                              m_gBuffers->getDescriptorImageInfo(eImgRendered));
+    m_resVisualizer->updateComputeDescriptorSets(m_diResContainer->getReservoir(),
+                                                 m_gBuffers->getDescriptorImageInfo(eImgRendered));
     m_tonemapper->updateComputeDescriptorSets(m_gBuffers->getDescriptorImageInfo(eImgRendered),
                                               m_gBuffers->getDescriptorImageInfo(eImgTonemapped));
     resetFrame();
@@ -265,25 +265,25 @@ public:
     const auto &size = m_app->getViewportSize();
     vkCmdDispatch(cmd, (size.width + (GROUP_SIZE - 1)) / GROUP_SIZE, (size.height + (GROUP_SIZE - 1)) / GROUP_SIZE, 1);
 
-    // VkBufferMemoryBarrier2KHR buffer_barrier{};
-    // buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
-    // buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
-    // buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
-    // buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-    // buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-    // buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    // buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    // buffer_barrier.buffer = m_diResContainer->getReservoir().buffer;
-    // buffer_barrier.size = m_diResContainer->getBufferSize();
+    VkBufferMemoryBarrier2KHR buffer_barrier{};
+    buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+    buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+    buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+    buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+    buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+    buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    buffer_barrier.buffer = m_diResContainer->getReservoir().buffer;
+    buffer_barrier.size = m_diResContainer->getBufferSize();
 
-    // VkDependencyInfoKHR dep_info{};
-    // dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
-    // dep_info.bufferMemoryBarrierCount = 1;
-    // dep_info.pBufferMemoryBarriers = &buffer_barrier;
+    VkDependencyInfoKHR dep_info{};
+    dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+    dep_info.bufferMemoryBarrierCount = 1;
+    dep_info.pBufferMemoryBarriers = &buffer_barrier;
 
-    // vkCmdPipelineBarrier2KHR(cmd, &dep_info);
+    vkCmdPipelineBarrier2KHR(cmd, &dep_info);
 
-    // m_resVisualizer->runCompute(cmd, size);
+    m_resVisualizer->runCompute(cmd, size);
 
     // Making sure the rendered image is ready to be used
     auto image_memory_barrier =
@@ -649,7 +649,7 @@ private:
 
   nvmath::vec2f m_viewSize = {1, 1};
   VkFormat m_colorFormat = VK_FORMAT_R32G32B32A32_SFLOAT; // Color format of the image
-  VkFormat m_depthFormat = VK_FORMAT_X8_D24_UNORM_PACK32; // Depth format of the depth buffer
+  VkFormat m_depthFormat = VK_FORMAT_D32_SFLOAT;          // Depth format of the depth buffer
   VkDevice m_device = VK_NULL_HANDLE;                     // Convenient
   std::unique_ptr<nvvkhl::GBuffer> m_gBuffers;            // G-Buffers: color + depth
 
@@ -716,6 +716,8 @@ auto main(int argc, char **argv) -> int
   spec.vkSetup.addDeviceExtension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
   VkPhysicalDeviceRayQueryFeaturesKHR rayqueryFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
   spec.vkSetup.addDeviceExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME, false, &rayqueryFeature);
+  VkPhysicalDeviceSynchronization2FeaturesKHR sync2Feature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR};
+  spec.vkSetup.addDeviceExtension(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, false, &sync2Feature);
 
   // Create the application
   auto app = std::make_unique<nvvkhl::Application>(spec);
