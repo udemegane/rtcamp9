@@ -18,11 +18,9 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     uint2 pixel = dispatchThreadId.xy;
     uint2 imgSize;
     gOutImage.GetDimensions(imgSize.x, imgSize.y); // DispatchRaysDimensions();
-    imgSize;
 
     if (pixel.x >= imgSize.x || pixel.y >= imgSize.y)
         return;
     uint pixel1D = pixel.x + imgSize.x * pixel.y;
-    float a;
     gOutImage[pixel] = float4(gRes[pixel1D].radiance, 1.0f);
 }

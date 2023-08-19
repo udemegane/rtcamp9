@@ -370,13 +370,12 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     if (true)
     { // First frame, replace the value in the buffer
         diReservoir[pixel1d].radiance = pixel_color;
-        // outImage[int2(launchID)] = float4(pixel_color + float3(0.5f, 0.0f, 0.0f), 1.0);
     }
     else
     { // Do accumulation over time
         float a = 1.0F / float(pushConst.frame + 1);
-        float3 old_color = outImage[int2(launchID)].xyz;
-        outImage[int2(launchID)] = float4(lerp(old_color, pixel_color, a), 1.0F);
+        float3 old_color = diReservoir[pixel1d].radiance;
+        diReservoir[pixel1d].radiance = lerp(old_color, pixel_color, a);
     }
 }
 
