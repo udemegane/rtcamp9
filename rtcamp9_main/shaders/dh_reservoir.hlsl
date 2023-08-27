@@ -27,3 +27,19 @@ struct DIReservoir
     vec3 radiance;
 };
 
+struct PackedReservoir
+{
+    vec4 posnrmx1;
+    vec4 posnrmx2;
+    vec4 nrmyz;
+    vec4 u1w;
+    // vec4 u2wsum;
+    vec4 radWsum;
+    int primId;
+    uint k;
+    uint M;
+    uint _dummy;
+    // float r1;
+    // float r2;
+    // float r3;
+};

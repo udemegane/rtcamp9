@@ -7,7 +7,7 @@
 #include "nvvkhl/alloc_vma.hpp"
 #include "nvvk/debug_util_vk.hpp"
 
-#include "shaders/di_reservoir.hlsl"
+#include "shaders/dh_reservoir.hlsl"
 #include "shaders/device_host.h"
 
 class DIReservoirContainer

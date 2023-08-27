@@ -1,5 +1,8 @@
 #pragma once
 #include "constants.hlsli"
+#include "dh_reservoir.hlsl"
+
+static const uint Mcap = 20;
 
 struct RcVertex
 {
@@ -79,36 +82,72 @@ float calcContributionWegiht(InitialReservoir r)
 
 bool updateReservoir(inout Reservoir r, in Sample s_i, const float w_i, const float u)
 {
+    r.M++;
+    if (w_i == 0)
+        return false;
+    r.w += w_i;
+
+    // Accept?
+    if (r.w * u <= w_i)
+    {
+        r.s = s_i;
+        return true;
+    }
     return false;
+}
+
+bool updateReservoir(inout Reservoir r, in Sample s_i, const float w_i, uint M, const float u)
+{
+    r.M += M;
+    if (w_i == 0)
+        return false;
+    r.w += w_i;
+
+    // Accept?
+    if (r.w * u <= w_i)
+    {
+        r.s = s_i;
+        return true;
+    }
+    return false;
+}
+
+void capReservoir(inout Reservoir r)
+{
+
+    r.M = min(r.M, Mcap);
+}
+
+float calcContributionWegiht(Reservoir r)
+{
+    float p_hat = length(r.s.radiance);
+    return p_hat == 0.0f ? 0.0f : (r.wSum / (p_hat + FLT_EPSILON));
 }
 
 // bool updateReservoir(inout DIReservoir r, in Sample)
 
-bool mergeReservoirFromDifferentDomains(inout Reservoir base_r, Reservoir in_r, float u)
-{
-    return false;
-}
-
 float calcJacobian(RcVertex from, RcVertex to)
 {
+
     return 0.f;
 }
 
-// TODO: implement correct this
-struct PackedReservoir
-{
-    float4 posnrmx1;
-    float4 posnrmx2;
-    float4 nrmyz;
-    float4 u1w;
-    float4 u2wsum;
-    // int primId;
-    uint k;
-    // uint M;
-    float r1;
-    float r2;
-    float r3;
-};
+// struct PackedReservoir
+// {
+//     float4 posnrmx1;
+//     float4 posnrmx2;
+//     float4 nrmyz;
+//     float4 u1w;
+//     // float4 u2wsum;
+//     float4 radWsum;
+//     int primId;
+//     uint k;
+//     uint M;
+//     uint _dummy;
+//     // float r1;
+//     // float r2;
+//     // float r3;
+// };
 
 PackedReservoir pack(Reservoir r)
 {
@@ -121,12 +160,17 @@ PackedReservoir pack(Reservoir r)
     outR.nrmyz.zw = r.s.to.nrm.yz;
     outR.u1w.xyz = r.s.u1;
     outR.u1w.w = r.w;
-    outR.u2wsum.xyz = r.s.u2;
-    outR.u2wsum.w = r.wSum;
+    outR.radWsum.xyz = r.s.radiance;
+    outR.radWsum.w = r.wSum;
+    outR.primId = r.s.primId;
+    // outR.u2wsum.xyz = r.s.u2;
+    // outR.u2wsum.w = r.wSum;
     outR.k = r.s.k;
-    outR.r1 = r.s.radiance.x;
-    outR.r2 = r.s.radiance.y;
-    outR.r3 = r.s.radiance.z;
+    outR.M = r.M;
+    outR._dummy = 0;
+    // outR.r1 = r.s.radiance.x;
+    // outR.r2 = r.s.radiance.y;
+    // outR.r3 = r.s.radiance.z;
     return outR;
 };
 
@@ -139,8 +183,15 @@ Reservoir unpack(PackedReservoir r)
     outR.s.to.nrm.x = r.posnrmx2.w;
     outR.s.from.nrm.yz = r.nrmyz.xy;
     outR.s.to.nrm.yz = r.nrmyz.zw;
-    outR.s.primId = -1;
+    outR.s.u1 = r.u1w.xyz;
+    outR.w = r.u1w.w;
+    outR.s.radiance = r.radWsum.xyz;
+    outR.wSum = r.radWsum.w;
+    // outR.s.u2 = r.u2wsum.xyz;
+    // outR.wSum = r.u2wsum.w;
+    outR.s.primId = r.primId;
     outR.s.k = r.k;
+    outR.M = r.M;
 
     return outR;
 };
