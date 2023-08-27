@@ -218,12 +218,13 @@ public:
   {
     auto sdbg = m_dutil->DBG_SCOPE(cmd);
 
+    // anim
     {
       const int idx = 1;
       m_nodes[idx].translation = vec3f(1.0f, 1.0f + sin(m_frame * (1.0f / 100.0f)), 1.0f);
 
       VkAccelerationStructureInstanceKHR &tinst = m_tlas[idx];
-      tinst.transform = nvvk::toTransformMatrixKHR(m_nodes[idx].localMatrix());
+      // tinst.transform = nvvk::toTransformMatrixKHR(m_nodes[idx].localMatrix());
     }
 
     m_rtBuilder.buildTlas(m_tlas, m_rtFrags, true);
@@ -339,7 +340,7 @@ private:
       n.translation = {0.0f, 0.0f, 0.0f};
     }
 
-    m_light.intensity = 100.0f;
+    m_light.intensity = 500.0f;
     m_light.position = {2.0f, 7.0f, 2.0f};
     m_light.radius = 0.2f;
 
@@ -673,6 +674,7 @@ private:
   std::vector<PrimitiveMeshVk> m_bMeshes;
   nvvk::Buffer m_bFrameInfo;
   nvvk::Buffer m_bPrimInfo;
+  nvvk::Buffer m_bSceneMatrixInfo;
   nvvk::Buffer m_bSceneDesc; // SceneDescription
   nvvk::Buffer m_bInstInfoBuffer;
   nvvk::Buffer m_bMaterials;

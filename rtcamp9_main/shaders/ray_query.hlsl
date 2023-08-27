@@ -26,6 +26,7 @@
 #include "constants.hlsli"
 #include "ggx.hlsli"
 #include "random.hlsli"
+#include "reservoir.hlsl"
 #include "sky.hlsli"
 
 #define WORKGROUP_SIZE 16
@@ -58,6 +59,48 @@ ConstantBuffer<FrameInfo> frameInfo;
 StructuredBuffer<SceneDescription> sceneDesc;
 [[vk::binding(B_outBuffer)]]
 RWStructuredBuffer<DIReservoir> diReservoir;
+
+#define IDENTITY_MATRIX float4x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+
+float4x4 inverse(float4x4 m)
+{
+    float n11 = m[0][0], n12 = m[1][0], n13 = m[2][0], n14 = m[3][0];
+    float n21 = m[0][1], n22 = m[1][1], n23 = m[2][1], n24 = m[3][1];
+    float n31 = m[0][2], n32 = m[1][2], n33 = m[2][2], n34 = m[3][2];
+    float n41 = m[0][3], n42 = m[1][3], n43 = m[2][3], n44 = m[3][3];
+
+    float t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44 + n22 * n33 * n44;
+    float t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44 - n12 * n33 * n44;
+    float t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44 + n12 * n23 * n44;
+    float t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34;
+
+    float det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
+    float idet = 1.0f / det;
+
+    float4x4 ret;
+
+    ret[0][0] = t11 * idet;
+    ret[0][1] = (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * idet;
+    ret[0][2] = (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * idet;
+    ret[0][3] = (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43 - n21 * n32 * n43) * idet;
+
+    ret[1][0] = t12 * idet;
+    ret[1][1] = (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44 + n11 * n33 * n44) * idet;
+    ret[1][2] = (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44 - n11 * n32 * n44) * idet;
+    ret[1][3] = (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43 + n11 * n32 * n43) * idet;
+
+    ret[2][0] = t13 * idet;
+    ret[2][1] = (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44 - n11 * n23 * n44) * idet;
+    ret[2][2] = (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44 + n11 * n22 * n44) * idet;
+    ret[2][3] = (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43 - n11 * n22 * n43) * idet;
+
+    ret[3][0] = t14 * idet;
+    ret[3][1] = (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * idet;
+    ret[3][2] = (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * idet;
+    ret[3][3] = (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * idet;
+
+    return ret;
+}
 
 //-----------------------------------------------------------------------
 // Payload
@@ -101,7 +144,7 @@ Material getMaterial(uint64_t materialAddress, uint64_t offset)
 
 //-----------------------------------------------------------------------
 // Return hit position, normal and geometric normal in world space
-HitState getHitState(float2 barycentricCoords, float3x4 worldToObject3x4, float3x4 objectToWorld3x4, int meshID, int primitiveID, float3 worldRayDirection)
+HitState getHitState(float2 barycentricCoords, float3x4 worldToObject3x4, float3x4 objectToWorld3x4, int meshID, int primitiveID, float3 worldRayDirection, int instanceIndex)
 {
     HitState hit;
 
@@ -125,6 +168,8 @@ HitState getHitState(float2 barycentricCoords, float3x4 worldToObject3x4, float3
     const float3 pos1 = v1.position.xyz;
     const float3 pos2 = v2.position.xyz;
     const float3 position = pos0 * barycentrics.x + pos1 * barycentrics.y + pos2 * barycentrics.z;
+    const float4x4 matrix = vk::RawBufferLoad<int>(sceneDesc[0].instInfoAddress + sizeof(InstanceInfo) * instanceIndex);
+    // hit.pos = mul(inverse(matrix), float4(position, 1.0f)).xyz; //
     hit.pos = float3(mul(objectToWorld3x4, float4(position, 1.0)));
 
     // Normal
@@ -162,6 +207,7 @@ void traceRay(RayDesc ray, inout HitPayload payload)
 
     if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
     {
+
         float2 barycentricCoords = q.CommittedTriangleBarycentrics();
         int meshID = q.CommittedInstanceID();          // rayQueryGetIntersectionInstanceCustomIndexEXT(rayQuery, true);
         int primitiveID = q.CommittedPrimitiveIndex(); // rayQueryGetIntersectionPrimitiveIndexEXT(rayQuery, true);
@@ -170,7 +216,7 @@ void traceRay(RayDesc ray, inout HitPayload payload)
         float hitT = q.CommittedRayT();
         int instanceIndex = q.CommittedInstanceIndex(); // rayQueryGetIntersectionInstanceIdEXT(rayQuery, true);
 
-        HitState hit = getHitState(barycentricCoords, worldToObject, objectToWorld, meshID, primitiveID, ray.Direction);
+        HitState hit = getHitState(barycentricCoords, worldToObject, objectToWorld, meshID, primitiveID, ray.Direction, instanceIndex);
 
         payload.hitT = hitT;
         payload.pos = hit.pos;
@@ -214,6 +260,8 @@ float3 pathTrace(RayDesc ray, inout uint seed)
     float3 throughput = float3(1.0F, 1.0F, 1.0F);
 
     HitPayload payload;
+    InitialReservoir initRes = make();
+    float weight = 1.0f;
     for (int depth = 0; depth < pushConst.maxDepth; depth++)
     {
         traceRay(ray, payload);
@@ -221,7 +269,8 @@ float3 pathTrace(RayDesc ray, inout uint seed)
         // Hitting the environment, then exit
         if (payload.hitT == INFINITE)
         {
-            float3 sky_color = float3(0.1, 0.1, 0.15); // Light blue grey
+
+            float3 sky_color = float3(0.1, 0.1, 0.20); // Light blue grey
             return radiance + (sky_color * throughput);
         }
 
@@ -251,6 +300,7 @@ float3 pathTrace(RayDesc ray, inout uint seed)
         pbrMat.f0 = lerp(float3(0.04F, 0.04F, 0.04F), pbrMat.albedo.xyz, mat.metallic);
 
         float3 contrib = float3(0, 0, 0);
+        float3 in_F = float3(0.0f, 0.0f, 0.0f);
 
         // Evaluation of direct light (sun)
         bool nextEventValid = (dot(L, payload.nrm) > 0.0f);
@@ -261,17 +311,18 @@ float3 pathTrace(RayDesc ray, inout uint seed)
             evalData.k2 = L;
             bsdfEvaluate(evalData, pbrMat);
 
-            const float3 w = sceneDesc[0].light.intensity.xxx * 1.0 / (distanceToLight * distanceToLight);
+            const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 100.0) / (distanceToLight * distanceToLight);
             contrib += w * evalData.bsdf_diffuse;
             contrib += w * evalData.bsdf_glossy;
+            in_F = contrib;
             contrib *= throughput;
         }
 
         // Sample BSDF
         {
             BsdfSampleData sampleData;
-            sampleData.k1 = -ray.Direction; // outgoing direction
-            sampleData.xi = float4(rand(seed), rand(seed), rand(seed), rand(seed));
+            sampleData.k1 = -ray.Direction;                                         // outgoing direction
+            sampleData.xi = float4(rand(seed), rand(seed), rand(seed), rand(seed)); // 4つめは今の実装だといらん
 
             bsdfSample(sampleData, pbrMat);
             if (sampleData.event_type == BSDF_EVENT_ABSORB)
@@ -289,6 +340,7 @@ float3 pathTrace(RayDesc ray, inout uint seed)
         if (rand(seed) >= rrPcont)
             break;             // paths with low throughput that won't contribute
         throughput /= rrPcont; // boost the energy of the non-terminated paths
+        weight *= rrPcont;
 
         // We are adding the contribution to the radiance only if the ray is not occluded by an object.
         if (nextEventValid)
@@ -301,11 +353,15 @@ float3 pathTrace(RayDesc ray, inout uint seed)
             bool inShadow = traceShadow(shadowRay);
             if (!inShadow)
             {
+                InitialSample s;
+                s.radiance = in_F;
+                s.f = contrib;
+                updateReservoir(initRes, s, weight, rand(seed));
                 radiance += contrib;
             }
         }
     }
-
+    return initRes.s.f * calcContributionWegiht(initRes);
     return radiance;
 }
 
@@ -367,7 +423,7 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result
-    if (true)
+    if (first_frame)
     { // First frame, replace the value in the buffer
         diReservoir[pixel1d].radiance = pixel_color;
     }

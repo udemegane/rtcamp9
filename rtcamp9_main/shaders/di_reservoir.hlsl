@@ -1,3 +1,6 @@
+#pragma once
+#include "constants.hlsli"
+
 #ifdef __cplusplus
 using mat4 = nvmath::mat4f;
 using vec4 = nvmath::vec4f;
@@ -23,3 +26,4 @@ struct DIReservoir
 {
     vec3 radiance;
 };
+
