@@ -146,7 +146,8 @@ GBufStruct samplePixel(inout uint seed, float2 launchID, float2 launchSize)
 
     RayDesc ray;
     ray.Origin = mul(frameInfo.viewInv, float4(0.0, 0.0, 0.0, 1.0)).xyz;
-    ray.Direction = mul(frameInfo.viewInv, float4(normalize(target.xyz), 0.0)).xyz;
+    float3 raydir = mul(frameInfo.viewInv, float4(normalize(target.xyz), 0.0)).xyz;
+    ray.Direction = raydir;
     ray.TMin = 0.001;
     ray.TMax = INFINITE;
 
@@ -154,8 +155,9 @@ GBufStruct samplePixel(inout uint seed, float2 launchID, float2 launchSize)
     traceRay(ray, payload);
     GBufStruct gbuf;
     gbuf.hitT = payload.hitT;
-    if (payload.hitT == INFINITE)
+    if (payload.hitT >= INFINITE)
     {
+        // gbuf.nrm = raydir;
         return gbuf;
     }
 
@@ -167,6 +169,10 @@ GBufStruct samplePixel(inout uint seed, float2 launchID, float2 launchSize)
     gbuf.pos = payload.pos;
     gbuf.nrm = payload.nrm;
     gbuf.matId = matID;
+    // gbuf.nrm.x = launchID.x / launchSize.x;
+    // gbuf.nrm.y = launchID.y / launchSize.y;
+    // gbuf.nrm = float3(0.0f, 1.0f, 0.0f);
+
     return gbuf;
 }
 

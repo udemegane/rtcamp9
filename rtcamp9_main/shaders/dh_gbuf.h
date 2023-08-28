@@ -25,8 +25,8 @@ using uint = uint32_t;
 #endif
 #endif // __cplusplus
 
-#define B_gbuf_tlas 0
-#define B_gbuf_outBuffer 1
+#define B_gbuf_tlas 1
+#define B_gbuf_outBuffer 0
 #define B_gbuf_frameInfo 2
 #define B_gbuf_sceneDesc 3
 

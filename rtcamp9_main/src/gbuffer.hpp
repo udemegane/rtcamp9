@@ -28,7 +28,7 @@ public:
     ~GBuffer();
     void createPipelineLayout();
     void createComputePIpeline();
-    void updateComputeDescriptorSets(VkWriteDescriptorSetAccelerationStructureKHR asInfo, VkDescriptorBufferInfo outBuffer, VkDescriptorBufferInfo frameInfo, VkDescriptorBufferInfo sceneInfo);
+    void updateComputeDescriptorSets(VkAccelerationStructureKHR tlas, VkDescriptorBufferInfo outBuffer, VkDescriptorBufferInfo frameInfo, VkDescriptorBufferInfo sceneInfo);
     void updatePushConstants(const VkExtent2D &size);
     void runCompute(VkCommandBuffer cmd, const VkExtent2D &size);
     bool onUI();
@@ -42,6 +42,7 @@ private:
     VkPipeline m_pipeline{VK_NULL_HANDLE};
 
     GbufConst m_pushConst;
+    std::unique_ptr<VkAccelerationStructureKHR> m_tlas;
     std::unique_ptr<VkWriteDescriptorSetAccelerationStructureKHR> m_asinfo;
     std::unique_ptr<VkDescriptorBufferInfo> m_outbuffer;
     std::unique_ptr<VkDescriptorBufferInfo> m_frameinfo;
@@ -69,7 +70,7 @@ public:
         GBufStruct data{};
 
         std::vector<GBufStruct>
-            r_info(size.height * size.width, data);
+            r_info(size.height * size.width * (4.0f / 3.0f), data);
         auto buffer = m_alloc->createBuffer(cmd, r_info, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
         m_size = r_info.size();
         m_dutil->DBG_NAME(buffer.buffer);

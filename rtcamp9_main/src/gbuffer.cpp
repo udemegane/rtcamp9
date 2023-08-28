@@ -49,9 +49,13 @@ void GBuffer::createComputePIpeline()
     vkDestroyShaderModule(m_ctx->m_device, comp_info.stage.module, nullptr);
 }
 
-void GBuffer::updateComputeDescriptorSets(VkWriteDescriptorSetAccelerationStructureKHR asInfo, VkDescriptorBufferInfo outBuffer, VkDescriptorBufferInfo frameInfo, VkDescriptorBufferInfo sceneInfo)
+void GBuffer::updateComputeDescriptorSets(VkAccelerationStructureKHR tlas, VkDescriptorBufferInfo outBuffer, VkDescriptorBufferInfo frameInfo, VkDescriptorBufferInfo sceneInfo)
 {
-    m_asinfo = std::make_unique<VkWriteDescriptorSetAccelerationStructureKHR>(asInfo);
+    m_tlas = std::make_unique<VkAccelerationStructureKHR>(tlas);
+    VkWriteDescriptorSetAccelerationStructureKHR descASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    descASInfo.accelerationStructureCount = 1;
+    descASInfo.pAccelerationStructures = m_tlas.get();
+    m_asinfo = std::make_unique<VkWriteDescriptorSetAccelerationStructureKHR>(descASInfo);
     m_outbuffer = std::make_unique<VkDescriptorBufferInfo>(outBuffer);
     m_frameinfo = std::make_unique<VkDescriptorBufferInfo>(frameInfo);
     m_sceneinfo = std::make_unique<VkDescriptorBufferInfo>(sceneInfo);

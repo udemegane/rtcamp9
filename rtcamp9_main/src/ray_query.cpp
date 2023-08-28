@@ -153,7 +153,7 @@ public:
     VkDescriptorBufferInfo dbi_unif{m_bFrameInfo.buffer, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo sceneDesc{m_bSceneDesc.buffer, 0, VK_WHOLE_SIZE};
 
-    m_gbufferPass->updateComputeDescriptorSets(descASInfo, m_gbufferContainer->getGBuffer(), dbi_unif, sceneDesc);
+    m_gbufferPass->updateComputeDescriptorSets(m_rtBuilder.getAccelerationStructure(), m_gbufferContainer->getGBuffer(), dbi_unif, sceneDesc);
     m_resVisualizer->updateComputeDescriptorSets(m_diResContainer->getReservoir(),
                                                  m_gBuffers->getDescriptorImageInfo(eImgRendered));
     m_tonemapper->updateComputeDescriptorSets(m_gBuffers->getDescriptorImageInfo(eImgRendered),
@@ -280,7 +280,9 @@ public:
     if (m_shaderCompile)
     {
       m_shaderCompile = false;
+
       reloadPipeline();
+      m_gbufferPass->createComputePIpeline();
     }
 
     // current screen size
