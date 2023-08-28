@@ -57,6 +57,23 @@ InitialReservoir make()
     return r;
 }
 
+Reservoir initReservoir()
+{
+    Reservoir r;
+    Sample s;
+    s.k = 0;
+    s.seed = 0;
+    s.radiance = float3(0.0f, 0.0f, 0.0f);
+    s.primId = -1;
+    s.to.nrm = float3(1.0f, 0.0f, 0.0f);
+    s.to.pos = float3(0.0f, 0.0f, 0.0f);
+    r.s = s;
+    r.w = 0.0f;
+    r.wSum = 0.0f;
+    r.M = 0;
+    return r;
+}
+
 // Update Path-Reservoir with stream input s and weight.
 // This is used when Initial Path-Resampling(NEE only).
 bool updateReservoir(inout InitialReservoir r, in InitialSample s_i, const float w_i, const float u)

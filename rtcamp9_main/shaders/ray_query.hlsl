@@ -21,6 +21,7 @@
 
 #include "device_host.h"
 #include "dh_bindings.h"
+#include "dh_gbuf.h"
 #include "dh_reservoir.hlsl"
 
 #include "constants.hlsli"
@@ -59,6 +60,8 @@ ConstantBuffer<FrameInfo> frameInfo;
 StructuredBuffer<SceneDescription> sceneDesc;
 [[vk::binding(B_outBuffer)]]
 RWStructuredBuffer<DIReservoir> diReservoir;
+[[vk::binding(B_gbuffer)]]
+RWStructuredBuffer<GBufStruct> gbuffer1d;
 
 #define IDENTITY_MATRIX float4x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
 
@@ -254,10 +257,10 @@ float3 getRandomPosition(float3 position, float radius, float2 randomValues)
 
 //-----------------------------------------------------------------------
 //-----------------------------------------------------------------------
-float3 pathTrace(RayDesc ray, inout uint seed)
+float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
 {
     float3 radiance = float3(0.0F, 0.0F, 0.0F);
-    float3 throughput = float3(1.0F, 1.0F, 1.0F);
+    // float3 throughput = float3(1.0F, 1.0F, 1.0F);
 
     HitPayload payload;
     InitialReservoir initRes = make();
@@ -279,7 +282,6 @@ float3 pathTrace(RayDesc ray, inout uint seed)
         uint64_t materialIDOffest = sizeof(float4x4);
         uint64_t instOffset = sizeof(InstanceInfo) * payload.instanceIndex;
         int matID = vk::RawBufferLoad<int>(sceneDesc[0].instInfoAddress + instOffset + materialIDOffest);
-
         float3 lightPos = getRandomPosition(pushConst.light.position, pushConst.light.radius, float2(rand(seed), rand(seed)));
         float distanceToLight = length(lightPos - payload.pos);
 
@@ -332,6 +334,9 @@ float3 pathTrace(RayDesc ray, inout uint seed)
             }
 
             throughput *= sampleData.bsdf_over_pdf;
+            return sampleData.bsdf_over_pdf;
+            return throughput;
+
             ray.Origin = offsetRay(payload.pos, payload.geonrm);
             ray.Direction = sampleData.k2;
         }
@@ -342,9 +347,8 @@ float3 pathTrace(RayDesc ray, inout uint seed)
             break;             // paths with low throughput that won't contribute
         throughput /= rrPcont; // boost the energy of the non-terminated paths
         weight *= rrPcont;
-
         // We are adding the contribution to the radiance only if the ray is not occluded by an object.
-        if (nextEventValid)
+        if (nextEventValid && depth != 0)
         {
             RayDesc shadowRay;
             shadowRay.Origin = ray.Origin;
@@ -362,9 +366,118 @@ float3 pathTrace(RayDesc ray, inout uint seed)
             }
         }
     }
+    // return radiance;
+
     return initRes.wSum;
     return initRes.s.f * calcContributionWegiht(initRes);
-    // return radiance;
+}
+
+float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, const float3 rayDir, inout uint seed)
+{
+    if (gbuffer1d[pixel1d].hitT >= INFINITE)
+    {
+
+        float3 sky_color = float3(0.1, 0.1, 0.20); // Light blue grey
+        return sky_color;
+    }
+    float3 di_radiance = float3(0.0f, 0.0f, 0.0f);
+    float3 throughput = float3(1.0f, 1.0f, 1.0f);
+    float weight = 0.0f;
+
+    GBufStruct gbuf = gbuffer1d[pixel1d];
+    uint64_t matOffset = sizeof(Material) * gbuf.matId;
+    Material mat = getMaterial(sceneDesc[0].materialAddress, matOffset);
+    // Setting up the material
+    PbrMaterial pbrMat;
+    pbrMat.albedo = float4(mat.albedo, 1);
+    pbrMat.roughness = mat.roughness;
+    pbrMat.metallic = mat.metallic;
+    pbrMat.normal = gbuf.nrm;
+    pbrMat.emissive = float3(0.0F, 0.0F, 0.0F);
+    pbrMat.f0 = lerp(float3(0.04F, 0.04F, 0.04F), pbrMat.albedo.xyz, mat.metallic);
+
+    float3 contrib = float3(0, 0, 0);
+
+    // Evaluation of direct light (sun)
+    // Direct Illumination evaluation
+    float pdf = 0.0F;
+    float3 lightPos = getRandomPosition(pushConst.light.position, pushConst.light.radius, float2(rand(seed), rand(seed)));
+    float distanceToLight = length(lightPos - gbuf.pos);
+    float3 V = -rayDir;
+    float3 L = normalize(lightPos - gbuf.pos);
+    bool nextEventValid = (dot(L, gbuf.nrm) > 0.0f);
+    if (nextEventValid)
+    {
+        BsdfEvaluateData evalData;
+        evalData.k1 = -rayDir;
+        evalData.k2 = L;
+        bsdfEvaluate(evalData, pbrMat);
+
+        const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 100.0) / (distanceToLight * distanceToLight);
+        contrib += w * evalData.bsdf_diffuse;
+        contrib += w * evalData.bsdf_glossy;
+    }
+
+    RayDesc ray;
+    ray.TMin = 0.001;
+    ray.TMax = INFINITE;
+    // Sample BSDF
+    {
+        BsdfSampleData sampleData;
+        sampleData.k1 = -rayDir;                                                // outgoing direction
+        sampleData.xi = float4(rand(seed), rand(seed), rand(seed), rand(seed)); // 4つめは今の実装だといらん
+
+        bsdfSample(sampleData, pbrMat);
+        if (sampleData.event_type == BSDF_EVENT_ABSORB)
+        {
+            return di_radiance;
+            // break; // Need to add the contribution ?
+        }
+
+        throughput *= sampleData.bsdf_over_pdf;
+        return sampleData.bsdf_over_pdf;
+        return throughput;
+        ray.Origin = offsetRay(gbuf.pos, gbuf.nrm * 2.0f);
+        ray.Direction = sampleData.k2;
+    }
+
+    {
+        /* rrPcont is always 1 on primary hit. */
+
+        // Russian-Roulette (minimizing live state)
+        float rrPcont = min(max(throughput.x, max(throughput.y, throughput.z)) + 0.001F, 0.95F);
+        if (rand(seed) >= rrPcont)
+            return di_radiance; // paths with low throughput that won't contribute
+        throughput /= rrPcont;  // boost the energy of the non-terminated paths
+        weight *= rrPcont;
+    }
+
+    // We are adding the contribution to the radiance only if the ray is not occluded by an object.
+    if (nextEventValid)
+    {
+        RayDesc shadowRay;
+        shadowRay.Origin = ray.Origin;
+        shadowRay.Direction = L;
+        shadowRay.TMin = 0.01;
+        shadowRay.TMax = distanceToLight;
+        bool inShadow = traceShadow(shadowRay);
+        if (!inShadow)
+        {
+            InitialSample s;
+            // s.radiance = contrib;
+            // s.f = contrib;
+            // updateReservoir(initRes, s, weight, rand(seed));
+            di_radiance += contrib;
+        }
+    }
+
+    // return ray.Direction;
+    // pbrMat mat;
+    float3 gi_radiance = pathTrace(ray, seed, throughput);
+    // return float(k) / 5.0f;
+    // return di_radiance;
+    return gi_radiance;
+    return di_radiance + gi_radiance;
 }
 
 //-----------------------------------------------------------------------
@@ -378,14 +491,19 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize)
     const float2 inUV = pixelCenter / launchSize;
     const float2 d = inUV * 2.0 - 1.0;
     const float4 target = mul(frameInfo.projInv, float4(d.x, d.y, 0.01, 1.0));
+    float3 rayDir = mul(frameInfo.viewInv, float4(normalize(target.xyz), 0.0)).xyz;
+
+    uint pixel1d = launchID.x + launchSize.x * launchID.y;
+    float3 thp = evaluatePrimaryHit(launchID, pixel1d, rayDir, seed);
 
     RayDesc ray;
     ray.Origin = mul(frameInfo.viewInv, float4(0.0, 0.0, 0.0, 1.0)).xyz;
-    ray.Direction = mul(frameInfo.viewInv, float4(normalize(target.xyz), 0.0)).xyz;
+    ray.Direction = rayDir;
     ray.TMin = 0.001;
     ray.TMax = INFINITE;
-
-    float3 radiance = pathTrace(ray, seed);
+    
+    float3 radiance = pathTrace(ray, seed, float3(1.0f, 1.0f, 1.0f));
+    radiance -= thp;
 
     // Removing fireflies
     float lum = dot(radiance, float3(0.212671F, 0.715160F, 0.072169F));
@@ -426,8 +544,9 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     bool first_frame = (pushConst.frame == 0);
     // Saving result
     if (true)
-    { // First frame, replace the value in the buffer
-        diReservoir[pixel1d].radiance = pixel_color;
+    {                                                // First frame, replace the value in the buffer
+        diReservoir[pixel1d].radiance = pixel_color; // gbuffer1d[pixel1d].nrm; // pixel_color;
+        // diReservoir[pixel1d].radiance = gbuffer1d[pixel1d].matId; // pixel_color;
     }
     else
     { // Do accumulation over time
