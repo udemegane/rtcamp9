@@ -22,24 +22,25 @@ using uint = uint32_t;
 #endif
 #endif // __cplusplus
 
+// #define GROUP_SIZE 16
+
 struct DIReservoir
 {
     vec3 radiance;
+    float _dummy;
 };
 
 struct PackedReservoir
 {
-    vec4 posnrmx1;
-    vec4 posnrmx2;
-    vec4 nrmyz;
-    vec4 u1w;
-    // vec4 u2wsum;
-    vec4 radWsum;
+    // 32bit x 16 = 64B
+    vec3 pos;
+    vec3 nrm;
+    vec3 rad;
     int primId;
     uint k;
+    uint seed;
+    float w;
+    float wSum;
     uint M;
     uint _dummy;
-    // float r1;
-    // float r2;
-    // float r3;
 };
