@@ -29,6 +29,7 @@ public:
     void createPipelineLayout();
     void createComputePIpeline();
     void updateComputeDescriptorSets(VkWriteDescriptorSetAccelerationStructureKHR asInfo, VkDescriptorBufferInfo outBuffer, VkDescriptorBufferInfo frameInfo, VkDescriptorBufferInfo sceneInfo);
+    void updatePushConstants(const VkExtent2D &size);
     void runCompute(VkCommandBuffer cmd, const VkExtent2D &size);
     bool onUI();
 

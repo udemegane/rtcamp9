@@ -62,6 +62,12 @@ void GBuffer::updateComputeDescriptorSets(VkWriteDescriptorSetAccelerationStruct
     m_writes.emplace_back(m_dset->makeWrite(0, B_gbuf_sceneDesc, m_sceneinfo.get()));
 }
 
+void GBuffer::updatePushConstants(const VkExtent2D &size)
+{
+    m_pushConst.height = size.height;
+    m_pushConst.width = size.width;
+}
+
 void GBuffer::runCompute(VkCommandBuffer cmd, const VkExtent2D &size)
 {
     auto sbdg = m_dutil->DBG_SCOPE(cmd);

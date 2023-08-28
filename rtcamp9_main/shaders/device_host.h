@@ -70,6 +70,9 @@ struct FrameInfo
   mat4 prevProjInv;
   mat4 prevViewInv;
   vec3 camPos;
+  int width;
+  int height;
+  int frame;
 };
 
 struct Material

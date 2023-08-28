@@ -261,6 +261,7 @@ float3 pathTrace(RayDesc ray, inout uint seed)
 
     HitPayload payload;
     InitialReservoir initRes = make();
+    Reservoir res = initReservoir();
     float weight = 1.0f;
     for (int depth = 0; depth < pushConst.maxDepth; depth++)
     {

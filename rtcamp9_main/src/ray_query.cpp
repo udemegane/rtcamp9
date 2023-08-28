@@ -118,6 +118,8 @@ public:
     m_rtBuilder.setup(m_device, m_alloc.get(), gctQueueIndex);
     m_sbt.setup(m_device, gctQueueIndex, m_alloc.get(), m_rtProperties);
 
+    m_frameinfo = FrameInfo{};
+
     // Create resources
     createScene();
     createVkBuffers();
@@ -142,19 +144,8 @@ public:
     destroyResources();
   }
 
-  void onResize(uint32_t width, uint32_t height) override
+  void updatePassDescriptors()
   {
-    auto cmd = m_app->createTempCmdBuffer();
-    auto size = VkExtent2D{static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
-    createGbuffers({width, height});
-
-    // recreate structuredbuffers
-    {
-      cmd = m_diResContainer->createReservoir(cmd, size);
-      cmd = m_gbufferContainer->createGBuffer(cmd, size);
-    }
-
-    // update descriptorsets
     VkAccelerationStructureKHR tlas = m_rtBuilder.getAccelerationStructure();
     VkWriteDescriptorSetAccelerationStructureKHR descASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     descASInfo.accelerationStructureCount = 1;
@@ -167,6 +158,36 @@ public:
                                                  m_gBuffers->getDescriptorImageInfo(eImgRendered));
     m_tonemapper->updateComputeDescriptorSets(m_gBuffers->getDescriptorImageInfo(eImgRendered),
                                               m_gBuffers->getDescriptorImageInfo(eImgTonemapped));
+  }
+
+  void onResize(uint32_t width, uint32_t height) override
+  {
+    auto cmd = m_app->createTempCmdBuffer();
+    auto size = VkExtent2D{static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+    createGbuffers({width, height});
+    m_gbufferPass->updatePushConstants(size);
+
+    // recreate structuredbuffers
+    {
+      cmd = m_diResContainer->createReservoir(cmd, size);
+      cmd = m_gbufferContainer->createGBuffer(cmd, size);
+    }
+
+    // update descriptorsets
+    updatePassDescriptors();
+
+    // VkAccelerationStructureKHR tlas = m_rtBuilder.getAccelerationStructure();
+    // VkWriteDescriptorSetAccelerationStructureKHR descASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    // descASInfo.accelerationStructureCount = 1;
+    // descASInfo.pAccelerationStructures = &tlas;
+    // VkDescriptorBufferInfo dbi_unif{m_bFrameInfo.buffer, 0, VK_WHOLE_SIZE};
+    // VkDescriptorBufferInfo sceneDesc{m_bSceneDesc.buffer, 0, VK_WHOLE_SIZE};
+
+    // m_gbufferPass->updateComputeDescriptorSets(descASInfo, m_gbufferContainer->getGBuffer(), dbi_unif, sceneDesc);
+    // m_resVisualizer->updateComputeDescriptorSets(m_diResContainer->getReservoir(),
+    //                                              m_gBuffers->getDescriptorImageInfo(eImgRendered));
+    // m_tonemapper->updateComputeDescriptorSets(m_gBuffers->getDescriptorImageInfo(eImgRendered),
+    //                                           m_gBuffers->getDescriptorImageInfo(eImgTonemapped));
 
     resetFrame();
     m_app->submitAndWaitTempCmdBuffer(cmd);
@@ -262,6 +283,9 @@ public:
       reloadPipeline();
     }
 
+    // current screen size
+    const auto &size = m_app->getViewportSize();
+
     float view_aspect_ratio = m_viewSize.x / m_viewSize.y;
     nvmath::vec3f eye;
     nvmath::vec3f center;
@@ -270,14 +294,28 @@ public:
 
     // Update Frame buffer uniform buffer
     const auto &clip = CameraManip.getClipPlanes();
-    FrameInfo finfo{
-        .proj = nvmath::perspectiveVK(CameraManip.getFov(), view_aspect_ratio, clip.x, clip.y),
-        .view = CameraManip.getMatrix(),
-        .projInv = nvmath::inverse(finfo.proj),
-        .viewInv = nvmath::inverse(finfo.view),
-        .camPos = eye,
-    };
-    vkCmdUpdateBuffer(cmd, m_bFrameInfo.buffer, 0, sizeof(FrameInfo), &finfo);
+    {
+      m_frameinfo.prevProj = m_frameinfo.proj;
+      m_frameinfo.prevView = m_frameinfo.view;
+      m_frameinfo.prevProjInv = m_frameinfo.projInv;
+      m_frameinfo.prevViewInv = m_frameinfo.viewInv;
+      m_frameinfo.proj = nvmath::perspectiveVK(CameraManip.getFov(), view_aspect_ratio, clip.x, clip.y);
+      m_frameinfo.view = CameraManip.getMatrix();
+      m_frameinfo.projInv = nvmath::inverse(m_frameinfo.proj);
+      m_frameinfo.viewInv = nvmath::inverse(m_frameinfo.view);
+      m_frameinfo.camPos = eye;
+      m_frameinfo.width = size.width;
+      m_frameinfo.height = size.height;
+      m_frameinfo.frame = m_frame;
+    }
+    // m_frameinfo{
+    //     .proj =
+    //         .view = CameraManip.getMatrix(),
+    //     .projInv = nvmath::inverse(finfo.proj),
+    //     .viewInv = nvmath::inverse(finfo.view),
+    //     .camPos = eye,
+    // };
+    vkCmdUpdateBuffer(cmd, m_bFrameInfo.buffer, 0, sizeof(FrameInfo), &m_frameinfo);
 
     m_pushConst.frame = m_frame;
     m_pushConst.light = m_light;
@@ -290,14 +328,31 @@ public:
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &memBarrier,
                          0, nullptr, 0, nullptr);
 
-    // current screen size
-    const auto &size = m_app->getViewportSize();
+    updatePassDescriptors();
 
     // Raytraced GBuffer
     m_gbufferPass->runCompute(cmd, size);
-    // TODO: memory Barrier
+    // GBuffer barrier
+    {
+      VkBufferMemoryBarrier2KHR buffer_barrier{};
+      buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+      buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+      buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+      buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      buffer_barrier.buffer = m_gbufferContainer->getGBuffer().buffer;
+      buffer_barrier.size = m_gbufferContainer->getBufferSize();
 
-    // Ray trace
+      VkDependencyInfoKHR dep_info{};
+      dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+      dep_info.bufferMemoryBarrierCount = 1;
+      dep_info.pBufferMemoryBarriers = &buffer_barrier;
+      vkCmdPipelineBarrier2KHR(cmd, &dep_info);
+    }
+
+    // Initial Sampling
     std::vector<VkDescriptorSet> descSets{m_rtSet->getSet()};
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_rtPipe.plines[0]);
     pushDescriptorSet(cmd);
@@ -305,23 +360,25 @@ public:
 
     vkCmdDispatch(cmd, (size.width + (GROUP_SIZE - 1)) / GROUP_SIZE, (size.height + (GROUP_SIZE - 1)) / GROUP_SIZE, 1);
 
-    VkBufferMemoryBarrier2KHR buffer_barrier{};
-    buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
-    buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
-    buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
-    buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-    buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
-    buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    buffer_barrier.buffer = m_diResContainer->getReservoir().buffer;
-    buffer_barrier.size = m_diResContainer->getBufferSize();
+    // Initial Sampling Reservoir Barrier
+    {
+      VkBufferMemoryBarrier2KHR buffer_barrier{};
+      buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+      buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+      buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+      buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      buffer_barrier.buffer = m_diResContainer->getReservoir().buffer;
+      buffer_barrier.size = m_diResContainer->getBufferSize();
 
-    VkDependencyInfoKHR dep_info{};
-    dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
-    dep_info.bufferMemoryBarrierCount = 1;
-    dep_info.pBufferMemoryBarriers = &buffer_barrier;
-    // float a;
-    vkCmdPipelineBarrier2KHR(cmd, &dep_info);
+      VkDependencyInfoKHR dep_info{};
+      dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+      dep_info.bufferMemoryBarrierCount = 1;
+      dep_info.pBufferMemoryBarriers = &buffer_barrier;
+      vkCmdPipelineBarrier2KHR(cmd, &dep_info);
+    }
 
     m_resVisualizer->runCompute(cmd, size);
 
@@ -580,6 +637,7 @@ private:
     m_rtSet->addBinding(B_outBuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
     m_rtSet->addBinding(B_frameInfo, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL);
     m_rtSet->addBinding(B_sceneDesc, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL);
+    m_rtSet->addBinding(B_gbuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
     m_rtSet->initLayout(VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
 
     // pushing time
@@ -613,6 +671,8 @@ private:
     writes.emplace_back(m_rtSet->makeWrite(0, B_outBuffer, &bufInfo));
     writes.emplace_back(m_rtSet->makeWrite(0, B_frameInfo, &dbi_unif));
     writes.emplace_back(m_rtSet->makeWrite(0, B_sceneDesc, &sceneDesc));
+    auto gbufInfo = m_gbufferContainer->getGBuffer();
+    writes.emplace_back(m_rtSet->makeWrite(0, B_gbuffer, &gbufInfo));
 
     vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_rtPipe.layout, 0,
                               static_cast<uint32_t>(writes.size()), writes.data());
@@ -715,12 +775,14 @@ private:
   std::vector<nvh::Node> m_nodes;
   std::vector<Material> m_materials;
   Light m_light;
+  FrameInfo m_frameinfo;
 
   VkShaderModule m_initTraceModule = VK_NULL_HANDLE;
 
   // structuredbuffers
   std::unique_ptr<GBufferContainer> m_gbufferContainer;
   std::unique_ptr<DIReservoirContainer> m_diResContainer;
+  // std::unique_ptr<ReservoirContainer> m_
 
   // Pipeline
   PushConstant m_pushConst{};                         // Information sent to the shader
