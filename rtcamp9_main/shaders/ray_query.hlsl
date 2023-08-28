@@ -21,7 +21,7 @@
 
 #include "device_host.h"
 #include "dh_bindings.h"
-#include "di_reservoir.hlsl"
+#include "dh_reservoir.hlsl"
 
 #include "constants.hlsli"
 #include "ggx.hlsli"
@@ -354,15 +354,16 @@ float3 pathTrace(RayDesc ray, inout uint seed)
             if (!inShadow)
             {
                 InitialSample s;
-                s.radiance = in_F;
+                s.radiance = contrib;
                 s.f = contrib;
                 updateReservoir(initRes, s, weight, rand(seed));
                 radiance += contrib;
             }
         }
     }
+    return initRes.wSum;
     return initRes.s.f * calcContributionWegiht(initRes);
-    return radiance;
+    // return radiance;
 }
 
 //-----------------------------------------------------------------------
@@ -423,7 +424,7 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result
-    if (first_frame)
+    if (true)
     { // First frame, replace the value in the buffer
         diReservoir[pixel1d].radiance = pixel_color;
     }

@@ -12,13 +12,14 @@ struct RcVertex
 // Sample for Path-Resampling
 struct Sample
 {
-    RcVertex from; // Reconnection-able origin Vertex V_{k-1}
-    RcVertex to;   // Reconnection-able destination Vertex V_k
-    int primId;
+    // RcVertex from; // Reconnection-able origin Vertex V_{k-1}
+    RcVertex to;     // Reconnection-able destination Vertex V_k
+    int primId;      //
     float3 radiance; // cached radiance of contribution from V_emit to V_k.
     uint k;          // Index of Reconnection-able Vertex
-    float3 u1;       // 3 random [0,1] for BSDF Random-Replay Sampling of Voffset_{k-2}, which was generated and used Vbase_{k-2}. (Ideally should we cache all randoms from Vbase_1 to Vbase_{k-2}?)
-    float3 u2;       // 3 random [0,1] for BSDF Sampling of V_k. If scene objects is dynamic, you need to launch shadow ray from V_k with this.
+    uint seed;       // seed of puesdo random generator
+    // float3 u1;       // 3 random [0,1] for BSDF Random-Replay Sampling of Voffset_{k-2}, which was generated and used Vbase_{k-2}. (Ideally should we cache all randoms from Vbase_1 to Vbase_{k-2}?)
+    // float3 u2;       // 3 random [0,1] for BSDF Sampling of V_k. If scene objects is dynamic, you need to launch shadow ray from V_k with this.
 };
 
 // Path-Resampling Reservoir
@@ -151,47 +152,31 @@ float calcJacobian(RcVertex from, RcVertex to)
 
 PackedReservoir pack(Reservoir r)
 {
-    PackedReservoir outR;
-    outR.posnrmx1.xyz = r.s.from.pos;
-    outR.posnrmx1.w = r.s.from.nrm.x;
-    outR.posnrmx2.xyz = r.s.to.pos;
-    outR.posnrmx2.w = r.s.to.nrm.x;
-    outR.nrmyz.xy = r.s.from.nrm.yz;
-    outR.nrmyz.zw = r.s.to.nrm.yz;
-    outR.u1w.xyz = r.s.u1;
-    outR.u1w.w = r.w;
-    outR.radWsum.xyz = r.s.radiance;
-    outR.radWsum.w = r.wSum;
-    outR.primId = r.s.primId;
-    // outR.u2wsum.xyz = r.s.u2;
-    // outR.u2wsum.w = r.wSum;
-    outR.k = r.s.k;
-    outR.M = r.M;
-    outR._dummy = 0;
-    // outR.r1 = r.s.radiance.x;
-    // outR.r2 = r.s.radiance.y;
-    // outR.r3 = r.s.radiance.z;
-    return outR;
+    PackedReservoir pr;
+    pr.pos = r.s.to.pos;
+    pr.nrm = r.s.to.nrm;
+    pr.rad = r.s.radiance;
+    pr.primId = r.s.primId;
+    pr.k = r.s.k;
+    pr.seed = r.s.seed;
+    pr.w = r.w;
+    pr.wSum = r.wSum;
+    pr.M = r.M;
+    pr._dummy = 0u;
+    return pr;
 };
 
-Reservoir unpack(PackedReservoir r)
+Reservoir unpack(PackedReservoir pr)
 {
-    Reservoir outR;
-    outR.s.from.pos = r.posnrmx1.xyz;
-    outR.s.from.nrm.x = r.posnrmx1.w;
-    outR.s.to.pos = r.posnrmx2.xyz;
-    outR.s.to.nrm.x = r.posnrmx2.w;
-    outR.s.from.nrm.yz = r.nrmyz.xy;
-    outR.s.to.nrm.yz = r.nrmyz.zw;
-    outR.s.u1 = r.u1w.xyz;
-    outR.w = r.u1w.w;
-    outR.s.radiance = r.radWsum.xyz;
-    outR.wSum = r.radWsum.w;
-    // outR.s.u2 = r.u2wsum.xyz;
-    // outR.wSum = r.u2wsum.w;
-    outR.s.primId = r.primId;
-    outR.s.k = r.k;
-    outR.M = r.M;
-
-    return outR;
+    Reservoir r;
+    r.s.to.pos = pr.pos;
+    r.s.to.nrm = pr.nrm;
+    r.s.radiance = pr.rad;
+    r.s.primId = pr.primId;
+    r.s.k = pr.k;
+    r.s.seed = pr.seed;
+    r.w = pr.w;
+    r.wSum = pr.wSum;
+    r.M = pr.M;
+    return r;
 };

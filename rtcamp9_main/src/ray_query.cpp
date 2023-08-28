@@ -53,9 +53,11 @@
 
 #include "shaders/dh_bindings.h"
 #include "shaders/device_host.h"
+#include "shaders/dh_gbuf.h"
 #include "nvvkhl/shaders/dh_sky.h"
 #include "shader_compiler.hpp"
 #include "reservoirs.hpp"
+#include "gbuffer.hpp"
 
 #if USE_HLSL
 #include "_autogen/ray_query_computeMain.spirv.h"
@@ -96,11 +98,15 @@ public:
     m_dutil = std::make_unique<nvvk::DebugUtil>(m_device);                   // Debug utility
     m_alloc = std::make_unique<nvvkhl::AllocVma>(m_app->getContext().get()); // Allocator
     m_rtSet = std::make_unique<nvvk::DescriptorSetContainer>(m_device);
+
+    // RenderPasses
     m_tonemapper = std::make_unique<nvvkhl::TonemapperPostProcess>(m_app->getContext().get(), m_alloc.get());
     m_resVisualizer = std::make_unique<VisualizeReservoir>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
+    m_gbufferPass = std::make_unique<GBuffer>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
 
     // prepare structured buffers
     m_diResContainer = std::make_unique<DIReservoirContainer>(m_dutil.get(), m_alloc.get());
+    m_gbufferContainer = std::make_unique<GBufferContainer>(m_dutil.get(), m_alloc.get());
 
     // Requesting ray tracing properties
     VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -126,6 +132,8 @@ public:
     m_tonemapper->createComputePipeline();
     m_resVisualizer->createPipelineLayout();
     m_resVisualizer->createComputePipeline();
+    m_gbufferPass->createPipelineLayout();
+    m_gbufferPass->createComputePIpeline();
   }
 
   void onDetach() override
@@ -139,11 +147,27 @@ public:
     auto cmd = m_app->createTempCmdBuffer();
     auto size = VkExtent2D{static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
     createGbuffers({width, height});
-    cmd = m_diResContainer->createReservoir(cmd, size);
+
+    // recreate structuredbuffers
+    {
+      cmd = m_diResContainer->createReservoir(cmd, size);
+      cmd = m_gbufferContainer->createGBuffer(cmd, size);
+    }
+
+    // update descriptorsets
+    VkAccelerationStructureKHR tlas = m_rtBuilder.getAccelerationStructure();
+    VkWriteDescriptorSetAccelerationStructureKHR descASInfo{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    descASInfo.accelerationStructureCount = 1;
+    descASInfo.pAccelerationStructures = &tlas;
+    VkDescriptorBufferInfo dbi_unif{m_bFrameInfo.buffer, 0, VK_WHOLE_SIZE};
+    VkDescriptorBufferInfo sceneDesc{m_bSceneDesc.buffer, 0, VK_WHOLE_SIZE};
+
+    m_gbufferPass->updateComputeDescriptorSets(descASInfo, m_gbufferContainer->getGBuffer(), dbi_unif, sceneDesc);
     m_resVisualizer->updateComputeDescriptorSets(m_diResContainer->getReservoir(),
                                                  m_gBuffers->getDescriptorImageInfo(eImgRendered));
     m_tonemapper->updateComputeDescriptorSets(m_gBuffers->getDescriptorImageInfo(eImgRendered),
                                               m_gBuffers->getDescriptorImageInfo(eImgTonemapped));
+
     resetFrame();
     m_app->submitAndWaitTempCmdBuffer(cmd);
   }
@@ -266,13 +290,19 @@ public:
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &memBarrier,
                          0, nullptr, 0, nullptr);
 
+    // current screen size
+    const auto &size = m_app->getViewportSize();
+
+    // Raytraced GBuffer
+    m_gbufferPass->runCompute(cmd, size);
+    // TODO: memory Barrier
+
     // Ray trace
     std::vector<VkDescriptorSet> descSets{m_rtSet->getSet()};
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_rtPipe.plines[0]);
     pushDescriptorSet(cmd);
     vkCmdPushConstants(cmd, m_rtPipe.layout, VK_SHADER_STAGE_ALL, 0, sizeof(PushConstant), &m_pushConst);
 
-    const auto &size = m_app->getViewportSize();
     vkCmdDispatch(cmd, (size.width + (GROUP_SIZE - 1)) / GROUP_SIZE, (size.height + (GROUP_SIZE - 1)) / GROUP_SIZE, 1);
 
     VkBufferMemoryBarrier2KHR buffer_barrier{};
@@ -656,6 +686,7 @@ private:
   std::unique_ptr<nvvk::DescriptorSetContainer> m_rtSet; // Descriptor set
   std::unique_ptr<VisualizeReservoir> m_resVisualizer;
   std::unique_ptr<nvvkhl::TonemapperPostProcess> m_tonemapper;
+  std::unique_ptr<GBuffer> m_gbufferPass;
 
   nvmath::vec2f m_viewSize = {1, 1};
   VkFormat m_colorFormat = VK_FORMAT_R32G32B32A32_SFLOAT; // Color format of the image
@@ -688,6 +719,7 @@ private:
   VkShaderModule m_initTraceModule = VK_NULL_HANDLE;
 
   // structuredbuffers
+  std::unique_ptr<GBufferContainer> m_gbufferContainer;
   std::unique_ptr<DIReservoirContainer> m_diResContainer;
 
   // Pipeline
