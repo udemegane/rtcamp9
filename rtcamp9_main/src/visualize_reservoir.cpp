@@ -18,6 +18,8 @@ void VisualizeReservoir::createPipelineLayout()
 {
   nvvk::DebugUtil dbg(m_ctx->m_device);
   m_dset->addBinding(eDebugPassInput, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+  m_dset->addBinding(B_compose_giInput, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+  m_dset->addBinding(B_compose_thpInput, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
   m_dset->addBinding(eDebugPassOutput, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
   m_dset->initLayout(VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
   m_dutil->DBG_NAME(m_dset->getLayout());
@@ -48,12 +50,16 @@ void VisualizeReservoir::createComputePipeline()
   vkDestroyShaderModule(m_ctx->m_device, comp_info.stage.module, nullptr);
 }
 
-void VisualizeReservoir::updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorImageInfo outImage)
+void VisualizeReservoir::updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorBufferInfo inGiReservoir, VkDescriptorImageInfo inThpImage, VkDescriptorImageInfo outImage)
 {
   m_ibuffer = std::make_unique<VkDescriptorBufferInfo>(inReservoir);
+  m_giReservoir = std::make_unique<VkDescriptorBufferInfo>(inGiReservoir);
+  m_thpimage = std::make_unique<VkDescriptorImageInfo>(inThpImage);
   m_oimage = std::make_unique<VkDescriptorImageInfo>(outImage);
   m_writes.clear();
   m_writes.emplace_back(m_dset->makeWrite(0, eDebugPassInput, m_ibuffer.get()));
+  m_writes.emplace_back(m_dset->makeWrite(0, B_compose_giInput, m_giReservoir.get()));
+  m_writes.emplace_back(m_dset->makeWrite(0, B_compose_thpInput, m_thpimage.get()));
   m_writes.emplace_back(m_dset->makeWrite(0, eDebugPassOutput, m_oimage.get()));
 }
 

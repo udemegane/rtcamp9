@@ -58,6 +58,7 @@
 #include "shader_compiler.hpp"
 #include "reservoirs.hpp"
 #include "gbuffer.hpp"
+#include "path_reuse.hpp"
 
 #if USE_HLSL
 #include "_autogen/ray_query_computeMain.spirv.h"
@@ -81,7 +82,8 @@ class RayQuery : public nvvkhl::IAppElement
   enum
   {
     eImgTonemapped,
-    eImgRendered
+    eImgRendered,
+    eImgIntermediate1
   };
 
 public:
@@ -103,9 +105,13 @@ public:
     m_tonemapper = std::make_unique<nvvkhl::TonemapperPostProcess>(m_app->getContext().get(), m_alloc.get());
     m_resVisualizer = std::make_unique<VisualizeReservoir>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
     m_gbufferPass = std::make_unique<GBuffer>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
+    m_spatialPathReusePass = std::make_unique<PathReuse>(m_app->getContext().get(), m_alloc.get(), m_compiler.get(), EResampleType::Spatial);
+    // m_temporalPathReusePass = std::make_unique<PathReuse>(m_app->getContext().get(), m_alloc.get(), m_compiler.get(), EResampleType::Spatial);
 
     // prepare structured buffers
     m_diResContainer = std::make_unique<DIReservoirContainer>(m_dutil.get(), m_alloc.get());
+    m_initReservoirContainer = std::make_unique<ReservoirContainer>(m_dutil.get(), m_alloc.get());
+    m_spatialReservoirContainer = std::make_unique<ReservoirContainer>(m_dutil.get(), m_alloc.get());
     m_gbufferContainer = std::make_unique<GBufferContainer>(m_dutil.get(), m_alloc.get());
 
     // Requesting ray tracing properties
@@ -119,6 +125,7 @@ public:
     m_sbt.setup(m_device, gctQueueIndex, m_alloc.get(), m_rtProperties);
 
     m_frameinfo = FrameInfo{};
+    m_xpos = 0.0f;
 
     // Create resources
     createScene();
@@ -136,6 +143,8 @@ public:
     m_resVisualizer->createComputePipeline();
     m_gbufferPass->createPipelineLayout();
     m_gbufferPass->createComputePIpeline();
+    m_spatialPathReusePass->createPipelineLayout();
+    m_spatialPathReusePass->createComputePipeline();
   }
 
   void onDetach() override
@@ -153,8 +162,19 @@ public:
     VkDescriptorBufferInfo dbi_unif{m_bFrameInfo.buffer, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo sceneDesc{m_bSceneDesc.buffer, 0, VK_WHOLE_SIZE};
 
-    m_gbufferPass->updateComputeDescriptorSets(m_rtBuilder.getAccelerationStructure(), m_gbufferContainer->getGBuffer(), dbi_unif, sceneDesc);
+    m_gbufferPass->updateComputeDescriptorSets(m_rtBuilder.getAccelerationStructure(),
+                                               m_gbufferContainer->getGBuffer(),
+                                               dbi_unif,
+                                               sceneDesc);
+    m_spatialPathReusePass->updateComputeDescriptorSets(m_initReservoirContainer->getReservoir(),
+                                                        m_spatialReservoirContainer->getReservoir(),
+                                                        m_gbufferContainer->getGBuffer(),
+                                                        m_gBuffers->getDescriptorImageInfo(eImgIntermediate1),
+                                                        dbi_unif,
+                                                        sceneDesc);
     m_resVisualizer->updateComputeDescriptorSets(m_diResContainer->getReservoir(),
+                                                 m_spatialReservoirContainer->getReservoir(),
+                                                 m_gBuffers->getDescriptorImageInfo(eImgIntermediate1),
                                                  m_gBuffers->getDescriptorImageInfo(eImgRendered));
     m_tonemapper->updateComputeDescriptorSets(m_gBuffers->getDescriptorImageInfo(eImgRendered),
                                               m_gBuffers->getDescriptorImageInfo(eImgTonemapped));
@@ -170,6 +190,8 @@ public:
     // recreate structuredbuffers
     {
       cmd = m_diResContainer->createReservoir(cmd, size);
+      cmd = m_initReservoirContainer->createReservoir(cmd, size);
+      cmd = m_spatialReservoirContainer->createReservoir(cmd, size);
       cmd = m_gbufferContainer->createGBuffer(cmd, size);
     }
 
@@ -209,6 +231,21 @@ public:
         }
       }
 
+      if (ImGui::CollapsingHeader("Camera Route", ImGuiTreeNodeFlags_DefaultOpen))
+      {
+        PropertyEditor::begin();
+        bool changed = PropertyEditor::entry("X Pos", [&]
+                                             { return ImGui::SliderFloat("#1", &m_xpos, -50.0F, 100.0F); });
+        if (changed)
+        {
+          CameraManip.setLookat({-15.0F + m_xpos, 4.33F, 0.0f}, {0.0F + m_xpos, 4.33F, 0.0F}, {0.0F, 1.0F, 0.0F});
+          m_light.position = {-8.0F + m_xpos,
+                              4.33F,
+                              0.0F};
+        }
+        PropertyEditor::end();
+      }
+
       bool changed{false};
       if (ImGui::CollapsingHeader("Settings", ImGuiTreeNodeFlags_DefaultOpen))
       {
@@ -231,7 +268,7 @@ public:
                                            { return ImGui::SliderInt("#1", &m_pushConst.maxDepth, 0, 20); });
           changed |=
               PropertyEditor::entry("Samples", [&]
-                                    { return ImGui::SliderInt("#1", &m_pushConst.maxSamples, 1, 10); });
+                                    { return ImGui::SliderInt("#1", &m_pushConst.maxSamples, 1, 100); });
           PropertyEditor::treePop();
         }
         PropertyEditor::end();
@@ -244,7 +281,8 @@ public:
 
       ImGui::End();
       if (changed)
-        resetFrame();
+        ;
+      // resetFrame();
     }
 
     { // Rendering Viewport
@@ -270,6 +308,70 @@ public:
 
       VkAccelerationStructureInstanceKHR &tinst = m_tlas[idx];
       // tinst.transform = nvvk::toTransformMatrixKHR(m_nodes[idx].localMatrix());
+
+      { // Gate 1
+        const int i1 = 6;
+        const int i2 = 7;
+        const int i3 = 8;
+
+        m_nodes[i1].rotation = nvmath::slerp_quats(
+            m_frame * (1.0f / 100.0f),
+            nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
+            nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
+        VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
+        tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
+
+        m_nodes[i2].rotation = nvmath::slerp_quats(
+            m_frame * (1.0f / 100.0f),
+            nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
+            nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
+        VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
+        tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
+
+        m_nodes[i3].rotation = nvmath::slerp_quats(
+            m_frame * (1.0f / 100.0f),
+            nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
+            nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
+        VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
+        tinst3.transform = nvvk::toTransformMatrixKHR(m_nodes[i3].localMatrix());
+      }
+
+      { // Gate 2
+        const int i1 = 12;
+        const int i2 = 13;
+        const int i3 = 14;
+        const float offset = -1.0f;
+        m_nodes[i1].rotation = nvmath::slerp_quats(
+            m_frame * (1.0f / 100.0f) + offset,
+            nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
+            nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
+        VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
+        tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
+
+        m_nodes[i2].rotation = nvmath::slerp_quats(
+            m_frame * (1.0f / 100.0f) + offset,
+            nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
+            nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
+        VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
+        tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
+
+        m_nodes[i3].rotation = nvmath::slerp_quats(
+            m_frame * (1.0f / 100.0f) + offset,
+            nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
+            nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
+        VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
+        tinst3.transform = nvvk::toTransformMatrixKHR(m_nodes[i3].localMatrix());
+      }
+      { // Mirror
+        const int m1 = 15;
+        const float offset = -2.0f;
+        m_nodes[m1].rotation = nvmath::slerp_quats(
+            m_frame * (1.0f / 100.0f) + offset,
+            nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
+            nvmath::quatf(0.707f, 0.0f, 0.0f, -0.707f));
+        VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[m1];
+        tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[m1].localMatrix());
+      }
     }
 
     m_rtBuilder.buildTlas(m_tlas, m_rtFrags, true);
@@ -283,6 +385,8 @@ public:
 
       reloadPipeline();
       m_gbufferPass->createComputePIpeline();
+      m_spatialPathReusePass->createComputePipeline();
+      m_resVisualizer->createComputePipeline();
     }
 
     // current screen size
@@ -364,6 +468,8 @@ public:
 
     // Initial Sampling Reservoir Barrier
     {
+      std::vector<VkBufferMemoryBarrier2KHR> barriers;
+
       VkBufferMemoryBarrier2KHR buffer_barrier{};
       buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
       buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
@@ -375,11 +481,52 @@ public:
       buffer_barrier.buffer = m_diResContainer->getReservoir().buffer;
       buffer_barrier.size = m_diResContainer->getBufferSize();
 
+      VkBufferMemoryBarrier2KHR reservoir_barrier{};
+      reservoir_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+      reservoir_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+      reservoir_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+      reservoir_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      reservoir_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      reservoir_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      reservoir_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      reservoir_barrier.buffer = m_initReservoirContainer->getReservoir().buffer;
+      reservoir_barrier.size = m_initReservoirContainer->getBufferSize();
+
+      barriers.emplace_back(buffer_barrier);
+      barriers.emplace_back(reservoir_barrier);
+
+      VkDependencyInfoKHR dep_info{};
+      dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+      dep_info.bufferMemoryBarrierCount = barriers.size();
+      dep_info.pBufferMemoryBarriers = barriers.data();
+      vkCmdPipelineBarrier2KHR(cmd, &dep_info);
+    }
+
+    m_spatialPathReusePass->runCompute(cmd, size);
+
+    {
+      VkBufferMemoryBarrier2KHR reservoir_barrier{};
+      reservoir_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+      reservoir_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+      reservoir_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+      reservoir_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      reservoir_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      reservoir_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      reservoir_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      reservoir_barrier.buffer = m_spatialReservoirContainer->getReservoir().buffer;
+      reservoir_barrier.size = m_spatialReservoirContainer->getBufferSize();
+
       VkDependencyInfoKHR dep_info{};
       dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
       dep_info.bufferMemoryBarrierCount = 1;
-      dep_info.pBufferMemoryBarriers = &buffer_barrier;
+      dep_info.pBufferMemoryBarriers = &reservoir_barrier;
       vkCmdPipelineBarrier2KHR(cmd, &dep_info);
+
+      auto image_memory_barrier =
+          nvvk::makeImageMemoryBarrier(m_gBuffers->getColorImage(eImgIntermediate1), VK_ACCESS_SHADER_READ_BIT,
+                                       VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+      vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+                           nullptr, 0, nullptr, 1, &image_memory_barrier);
     }
 
     m_resVisualizer->runCompute(cmd, size);
@@ -397,13 +544,39 @@ public:
 private:
   void createScene()
   {
+
     m_materials.push_back({{0.985f, 0.862f, 0.405f}, 0.5f, 0.0f});
     m_materials.push_back({{0.622f, 0.928f, 0.728f}, 0.05f, 1.0f});
     m_materials.push_back({{.7F, .7F, .7F}, 0.3f, 0.0f});
+    m_materials.push_back({{0.125, 0.0, 0.301}, 0.4f, 1.0f}); // Black violet
+    m_materials.push_back({{1.0, 1.0, 1.0}, 1.0f, 0.0f});     // White
+    m_materials.push_back({{0.0, 0.0, 0.1}, 0.4f, 0.0f});     // mat black
+    m_materials.push_back({{1.0, 1.0, 1.0}, 0.0f, 0.0f});     // White with reflection 6
+    m_materials.push_back({{1.0, 1.0, 1.0}, 0.0f, 1.0f});     // Mirror
 
     m_meshes.emplace_back(nvh::createCube(1, 1, 1));
     m_meshes.emplace_back(nvh::createSphereUv(0.5f));
     m_meshes.emplace_back(nvh::createPlane(10, 100, 100));
+    m_meshes.emplace_back(nvh::createCube(20, 0.5f, 20));
+
+    m_meshes.emplace_back(nvh::createCube(100, 20, 1)); // Right Wall
+    m_meshes.emplace_back(nvh::createCube(100, 20, 1)); // Left Wall
+
+    m_meshes.emplace_back(nvh::createCube(0.1, 60, 12)); // Panel 1
+    m_meshes.emplace_back(nvh::createCube(0.1, 60, 12)); // Panel 2
+    m_meshes.emplace_back(nvh::createCube(0.1, 60, 12)); // Panel 3
+
+    m_meshes.emplace_back(nvh::createCube(15, 20, 1.1));  // Room1 R
+    m_meshes.emplace_back(nvh::createCube(15, 20, 1.1));  // Room1 L
+    m_meshes.emplace_back(nvh::createCube(15, 1.05, 20)); // Room1 B 11
+
+    m_meshes.emplace_back(nvh::createCube(0.1, 60, 12)); // Panel 1
+    m_meshes.emplace_back(nvh::createCube(0.1, 60, 12)); // Panel 2
+    m_meshes.emplace_back(nvh::createCube(0.1, 60, 12)); // Panel 3 14
+
+    m_meshes.emplace_back(nvh::createCube(0.1, 40, 30)); // Mirror1
+    m_meshes.emplace_back(nvh::createCube(0.1, 20, 15)); // Mirror 2
+    m_meshes.emplace_back(nvh::createCube(0.1, 40, 30)); // Mirror 3 17
 
     // Instance Cube
     {
@@ -425,23 +598,148 @@ private:
     {
       auto &n = m_nodes.emplace_back();
       n.mesh = 2;
-      n.material = 2;
+      n.material = 3;
       n.translation = {0.0f, 0.0f, 0.0f};
     }
 
+    {
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 3;
+      n.material = 2;
+      n.translation = {0.0f, 30.0f, 0.0f};
+    }
+
+    { // Right Wall
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 4;
+      n.material = 3;
+      // nvmath::vec3f()
+      n.translation = {0.0f, 8.66f, 5.0f};
+      n.rotation = nvmath::quatf(-0.259f, 0.0f, 0.0f, 0.966f);
+    }
+    { // Left Wall
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 5;
+      n.material = 3;
+      n.translation = {0.0f, 8.66f, -5.0f};
+      n.rotation = nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f);
+    }
+
+    { // Gate Panel 1
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 6;
+      n.material = 5;
+      n.translation = {0.0f, 17.7f, -6.0f};
+      // n.rotation = nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f);  // from
+      n.rotation = nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f); // to
+    }
+
+    { // Gate Panel 2
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 7;
+      n.material = 5;
+      n.translation = {0.0f, -6.7f, -8.66f};
+      n.rotation = nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f); // from
+      n.rotation = nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f); // to
+    }
+
+    { // Gate Panel 3
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 8;
+      n.material = 5;
+      n.translation = {0.0f, 5.3f, 13.215f};
+      n.rotation = nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f); // from
+      n.rotation = nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f); // to
+    }
+
+    { // Room1 R
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 9;
+      n.material = 4;
+      n.translation = {10.0f, 8.66f, 4.95f};
+      n.rotation = nvmath::quatf(-0.259f, 0.0f, 0.0f, 0.966f);
+    }
+
+    { // Room1 L
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 10;
+      n.material = 4;
+      n.translation = {10.0f, 8.66f, -4.95f};
+      n.rotation = nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f);
+    }
+
+    { // Room1 B
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 11;
+      n.material = 4;
+      n.translation = {10.0f, 0.0f, 0.0f};
+      // n.rotation = nvmath::quatf(-0.259f, 0.0f, 0.0f, 0.966f);
+    }
+
+    { // Gate Panel 1
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 12;
+      n.material = 6;
+      n.translation = {15.0f, 17.7f, -6.0f};
+      n.rotation = nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f); // from
+      // n.rotation = nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f); // to
+    }
+
+    { // Gate Panel 2
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 13;
+      n.material = 6;
+      n.translation = {15.0f, -6.7f, -8.66f};
+      n.rotation = nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f); // from
+      // n.rotation = nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f); // to
+    }
+
+    { // Gate Panel 3
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 14;
+      n.material = 6;
+      n.translation = {15.0f, 5.3f, 13.215f};
+      n.rotation = nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f); // from
+      // n.rotation = nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f); // to
+    }
+
+    { // Mirror 1
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 15;
+      n.material = 7;
+      n.translation = {25.0f, 0.01f, 0.0f};
+      n.rotation = nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f); // from
+      // n.rotation = nvmath::quatf(0.707f, 0.0f, 0.0f, -0.707f); // to
+    }
+    // { // MIrror 2
+    //   auto &n = m_nodes.emplace_back();
+    //   n.mesh = 16;
+    //   n.material = 7;
+    //   n.translation = {24.99f, 8.66f, -4.99f};
+    //   n.rotation = nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f);      // from
+    //   n.rotation = nvmath::quatf(0.612f, -0.354f, 0.612f, -0.354f); // to
+    // }
+    // { // Mirror 3
+    //   auto &n = m_nodes.emplace_back();
+    //   n.mesh = 17;
+    //   n.material = 7;
+    //   n.translation = {24.98f, 8.66f, 5.0f};
+    //   n.rotation = nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f); // from
+    //   // n.rotation = nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f); // to
+    // }
+
     m_light.intensity = 500.0f;
-    m_light.position = {2.0f, 7.0f, 2.0f};
-    m_light.radius = 0.2f;
+    m_light.position = {-1.5f, 4.33f, 0.0f};
+    m_light.radius = 0.3f;
 
     // Setting camera to see the scene
     CameraManip.setClipPlanes({0.1F, 100.0F});
-    CameraManip.setLookat({-2.0F, 2.5F, 3.0f}, {0.4F, 0.3F, 0.2F}, {0.0F, 1.0F, 0.0F});
-
+    CameraManip.setLookat({-15.0F, 4.33F, 0.0f}, {0.0F, 4.33F, 0.0F}, {0.0F, 1.0F, 0.0F});
     // Default parameters for overall material
     m_pushConst.maxDepth = 5;
     m_pushConst.frame = 0;
     m_pushConst.fireflyClampThreshold = 10;
-    m_pushConst.maxSamples = 2;
+    m_pushConst.maxSamples = 10;
     m_pushConst.light = m_light;
   }
 
@@ -449,7 +747,7 @@ private:
   {
     // Rendering image targets
     m_viewSize = size;
-    std::vector<VkFormat> color_buffers = {m_colorFormat, m_colorFormat}; // tonemapped, original
+    std::vector<VkFormat> color_buffers = {m_colorFormat, m_colorFormat, m_colorFormat}; // tonemapped, original
     m_gBuffers = std::make_unique<nvvkhl::GBuffer>(m_device, m_alloc.get(),
                                                    VkExtent2D{static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y)},
                                                    color_buffers, m_depthFormat);
@@ -640,6 +938,7 @@ private:
     m_rtSet->addBinding(B_frameInfo, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL);
     m_rtSet->addBinding(B_sceneDesc, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL);
     m_rtSet->addBinding(B_gbuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+    m_rtSet->addBinding(B_outReservoir, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
     m_rtSet->initLayout(VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
 
     // pushing time
@@ -667,14 +966,16 @@ private:
     VkDescriptorBufferInfo dbi_unif{m_bFrameInfo.buffer, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo sceneDesc{m_bSceneDesc.buffer, 0, VK_WHOLE_SIZE};
     auto bufInfo = m_diResContainer->getReservoir();
+    auto resInfo = m_initReservoirContainer->getReservoir();
+    auto gbufInfo = m_gbufferContainer->getGBuffer();
     std::vector<VkWriteDescriptorSet> writes;
     writes.emplace_back(m_rtSet->makeWrite(0, B_tlas, &descASInfo));
     writes.emplace_back(m_rtSet->makeWrite(0, B_outImage, &imageInfo));
     writes.emplace_back(m_rtSet->makeWrite(0, B_outBuffer, &bufInfo));
     writes.emplace_back(m_rtSet->makeWrite(0, B_frameInfo, &dbi_unif));
     writes.emplace_back(m_rtSet->makeWrite(0, B_sceneDesc, &sceneDesc));
-    auto gbufInfo = m_gbufferContainer->getGBuffer();
     writes.emplace_back(m_rtSet->makeWrite(0, B_gbuffer, &gbufInfo));
+    writes.emplace_back(m_rtSet->makeWrite(0, B_outReservoir, &resInfo));
 
     vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_rtPipe.layout, 0,
                               static_cast<uint32_t>(writes.size()), writes.data());
@@ -683,7 +984,10 @@ private:
   //--------------------------------------------------------------------------------------------------
   // To be call when renderer need to re-start
   //
-  void resetFrame() { m_frame = -1; }
+  void resetFrame()
+  {
+    // m_frame = -1;
+  }
 
   //--------------------------------------------------------------------------------------------------
   // If the camera matrix has changed, resets the frame.
@@ -749,6 +1053,8 @@ private:
   std::unique_ptr<VisualizeReservoir> m_resVisualizer;
   std::unique_ptr<nvvkhl::TonemapperPostProcess> m_tonemapper;
   std::unique_ptr<GBuffer> m_gbufferPass;
+  std::unique_ptr<PathReuse> m_spatialPathReusePass;
+  std::unique_ptr<PathReuse> m_temporalPathReusePass;
 
   nvmath::vec2f m_viewSize = {1, 1};
   VkFormat m_colorFormat = VK_FORMAT_R32G32B32A32_SFLOAT; // Color format of the image
@@ -784,7 +1090,8 @@ private:
   // structuredbuffers
   std::unique_ptr<GBufferContainer> m_gbufferContainer;
   std::unique_ptr<DIReservoirContainer> m_diResContainer;
-  // std::unique_ptr<ReservoirContainer> m_
+  std::unique_ptr<ReservoirContainer> m_initReservoirContainer;
+  std::unique_ptr<ReservoirContainer> m_spatialReservoirContainer;
 
   // Pipeline
   PushConstant m_pushConst{};                         // Information sent to the shader
@@ -792,6 +1099,8 @@ private:
   VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;     // The graphic pipeline to render
   int m_frame{0};
   int m_maxFrames{10000};
+
+  float m_xpos = 0.0f;
 
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
   nvvk::SBTWrapper m_sbt; // Shading binding table wrapper

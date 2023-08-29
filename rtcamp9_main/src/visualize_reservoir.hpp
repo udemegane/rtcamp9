@@ -31,7 +31,7 @@ public:
 
     void createPipelineLayout();
     void createComputePipeline();
-    void updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorImageInfo outImage);
+    void updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorBufferInfo inGiReservoir, VkDescriptorImageInfo inThpImage, VkDescriptorImageInfo outImage);
 
     void runCompute(VkCommandBuffer cmd, const VkExtent2D &size);
 
@@ -47,6 +47,8 @@ private:
 
     DBGConstant m_pushConst;
     std::unique_ptr<VkDescriptorBufferInfo> m_ibuffer;
+    std::unique_ptr<VkDescriptorImageInfo> m_thpimage;
+    std::unique_ptr<VkDescriptorBufferInfo> m_giReservoir;
     std::unique_ptr<VkDescriptorImageInfo> m_oimage;
     std::vector<VkWriteDescriptorSet> m_writes;
 };

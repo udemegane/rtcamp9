@@ -62,6 +62,8 @@ StructuredBuffer<SceneDescription> sceneDesc;
 RWStructuredBuffer<DIReservoir> diReservoir;
 [[vk::binding(B_gbuffer)]]
 RWStructuredBuffer<GBufStruct> gbuffer1d;
+[[vk::binding(B_outReservoir)]]
+RWStructuredBuffer<PackedReservoir> packedReservoir;
 
 #define IDENTITY_MATRIX float4x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
 
@@ -261,7 +263,7 @@ void setReconnectionSurface()
 
 //-----------------------------------------------------------------------
 //-----------------------------------------------------------------------
-float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
+float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput, uint pixel1d)
 {
     float3 radiance = float3(0.0F, 0.0F, 0.0F);
 
@@ -272,7 +274,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
     Sample s;
     bool isSampleReady = false;
     float weight = 1.0f;
-    uint initialSeed = seed;
+    // uint initialSeed = seed;
     float3 sampleThp = float3(0.0f, 0.0f, 0.0f); // 最初はThp無効(0に何かけても0なので)
 
     float3 thp_v0_to_vc = float3(0.0f, 0.0f, 0.0f); // 検証用 カメラからリコネクション点までのスループットをキャッシュする
@@ -304,7 +306,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
         if (payload.hitT == INFINITE)
         {
 
-            float3 sky_color = float3(0.1, 0.1, 0.20); // Light blue grey
+            float3 sky_color = float3(0.0, 0.0, 0.0); // Light blue grey
             return radiance + (sky_color * throughput);
         }
 
@@ -336,7 +338,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
                 s.to.nrm = payload.nrm;
                 s.primId = payload.instanceIndex;
                 s.k = depth;
-                s.seed = initialSeed;
+                s.seed = initSeed;
                 isSampleReady = true;
                 // thpを初期化(有効化)
                 sampleThp = float3(1.0f, 1.0f, 1.0f);
@@ -356,7 +358,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
             evalData.k2 = L;
             bsdfEvaluate(evalData, pbrMat);
 
-            const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 100.0) / (distanceToLight * distanceToLight);
+            const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 500.0) / (distanceToLight * distanceToLight);
             contrib += w * evalData.bsdf_diffuse;
             contrib += w * evalData.bsdf_glossy;
             Li = contrib;
@@ -411,14 +413,20 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
             }
         }
     }
-    // return radiance;
-
+    return radiance;
+    packedReservoir[pixel1d] = pack(res);
     // return initRes.wSum - radiance;
-    return (thp_v0_to_vc * res.s.radiance * calcContributionWegiht(res));
+    float W = calcContributionWegiht(res);
+
+    return float3(0.0f, 0.0f, 0.0f); // float3(W, W, W);
+    // return res.s.radiance;
+    // return thp_v0_to_vc;
+    // return (thp_v0_to_vc * res.s.radiance * calcContributionWegiht(res));
 }
 
-float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout uint seed, inout float3 throughput)
+float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout uint seed, out uint initSeed, inout float3 throughput)
 {
+    initSeed = seed;
     float3 radiance = float3(0.0F, 0.0F, 0.0F);
     // float3 throughput = float3(1.0F, 1.0F, 1.0F);
 
@@ -486,7 +494,7 @@ float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout ui
         evalData.k2 = L;
         bsdfEvaluate(evalData, pbrMat);
 
-        const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 100.0) / (distanceToLight * distanceToLight);
+        const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 500.0) / (distanceToLight * distanceToLight);
         contrib += w * evalData.bsdf_diffuse;
         contrib += w * evalData.bsdf_glossy;
         in_F = contrib;
@@ -562,11 +570,10 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize)
     ray.TMin = 0.001;
     ray.TMax = INFINITE;
     float3 thp = float3(1.0f, 1.0f, 1.0f);
-    float3 di_radiance = evaluatePrimaryHit(launchID, pixel1d, ray, seed, thp);
-    float3 gi_radiance = pathTrace(ray, seed, thp);
+    uint initSeed;
+    float3 di_radiance = evaluatePrimaryHit(launchID, pixel1d, ray, seed, initSeed, thp);
+    float3 gi_radiance = pathTrace(ray, seed, initSeed, thp, pixel1d);
     float3 radiance = gi_radiance;
-    // float3 radiance2 = pathTrace(ray, seed, float3(1.0f, 1.0f, 1.0f));
-    // radiance -= thp;
 
     // Removing fireflies
     float lum = dot(radiance, float3(0.212671F, 0.715160F, 0.072169F));
@@ -606,7 +613,7 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result
-    if (first_frame)
+    if (true)
     {                                                // First frame, replace the value in the buffer
         diReservoir[pixel1d].radiance = pixel_color; // gbuffer1d[pixel1d].nrm; // pixel_color;
         // diReservoir[pixel1d].radiance = gbuffer1d[pixel1d].matId; // pixel_color;

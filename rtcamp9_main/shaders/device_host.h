@@ -45,9 +45,9 @@ using uint = uint32_t;
 struct Light
 {
   vec3 position;
+  vec3 color;
   float intensity;
   float radius; // on XZ plane
-  float pad0;   // alignment of 8
 };
 
 struct PushConstant

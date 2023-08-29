@@ -14,7 +14,9 @@ using vec2 = nvmath::vec2f;
 
 // Bindings
 #define eDebugPassInput 0
-#define eDebugPassOutput 1
+#define B_compose_giInput 1
+#define B_compose_thpInput 2
+#define eDebugPassOutput 3
 
 struct DBGConstant
 {

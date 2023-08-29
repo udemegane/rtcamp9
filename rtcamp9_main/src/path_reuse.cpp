@@ -1,8 +1,8 @@
 #pragma once
 #include "path_reuse.hpp"
 
-static const auto spatialFileName = L"temporal_reuse.hlsl";
-static const auto temporalFileName = L"";
+static const auto spatialFileName = L"spatial_reuse.hlsl";
+static const auto temporalFileName = L"temporal_reuse.hlsl";
 
 PathReuse::PathReuse(nvvk::Context *ctx, nvvkhl::AllocVma *alloc, HLSLShaderCompiler *compiler, EResampleType type)
     : m_ctx(ctx), m_dutil(std::make_unique<nvvk::DebugUtil>(ctx->m_device)), m_dset(std::make_unique<nvvk::DescriptorSetContainer>(ctx->m_device)), m_compiler(compiler), m_type(type)
@@ -21,6 +21,9 @@ void PathReuse::createPipelineLayout()
     m_dset->addBinding(B_reuse_gbuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
     m_dset->addBinding(B_reuse_frameinfo, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL);
     m_dset->addBinding(B_reuse_outReservoir, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL);
+    m_dset->addBinding(B_reuse_scenedesc, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL);
+    m_dset->addBinding(B_reuse_outThp, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+
     m_dset->initLayout(VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
 
     // // pushing time
@@ -64,17 +67,21 @@ void PathReuse::createComputePipeline()
     vkDestroyShaderModule(m_ctx->m_device, comp_info.stage.module, nullptr);
 }
 
-void PathReuse::updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorBufferInfo outReservoir, VkDescriptorBufferInfo gbuffer, VkDescriptorBufferInfo frameInfo)
+void PathReuse::updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorBufferInfo outReservoir, VkDescriptorBufferInfo gbuffer, VkDescriptorImageInfo thpImage, VkDescriptorBufferInfo frameInfo, VkDescriptorBufferInfo sceneInfo)
 {
     m_ireservoir = std::make_unique<VkDescriptorBufferInfo>(inReservoir);
     m_gbuffer = std::make_unique<VkDescriptorBufferInfo>(gbuffer);
     m_frameinfo = std::make_unique<VkDescriptorBufferInfo>(frameInfo);
+    m_sceneinfo = std::make_unique<VkDescriptorBufferInfo>(sceneInfo);
     m_oreservoir = std::make_unique<VkDescriptorBufferInfo>(outReservoir);
+    m_thpimage = std::make_unique<VkDescriptorImageInfo>(thpImage);
     m_writes.clear();
     m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_inReservoir, m_ireservoir.get()));
     m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_outReservoir, m_oreservoir.get()));
     m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_gbuffer, m_gbuffer.get()));
     m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_frameinfo, m_frameinfo.get()));
+    m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_scenedesc, m_sceneinfo.get()));
+    m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_outThp, m_thpimage.get()));
 }
 
 void PathReuse::updateConstants(const VkExtent2D &size)

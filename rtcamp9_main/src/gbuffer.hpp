@@ -70,7 +70,7 @@ public:
         GBufStruct data{};
 
         std::vector<GBufStruct>
-            r_info(size.height * size.width * (4.0f / 3.0f), data);
+            r_info(size.height * size.width * 1.5f, data);
         auto buffer = m_alloc->createBuffer(cmd, r_info, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
         m_size = r_info.size();
         m_dutil->DBG_NAME(buffer.buffer);

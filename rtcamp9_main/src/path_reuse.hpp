@@ -31,7 +31,7 @@ public:
     ~PathReuse();
     void createPipelineLayout();
     void createComputePipeline();
-    void updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorBufferInfo outReservoir, VkDescriptorBufferInfo gbuffer, VkDescriptorBufferInfo sceneInfo);
+    void updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorBufferInfo outReservoir, VkDescriptorBufferInfo gbuffer, VkDescriptorImageInfo thpImage, VkDescriptorBufferInfo frameInfo, VkDescriptorBufferInfo sceneInfo);
     void updateConstants(const VkExtent2D &size);
     void runCompute(VkCommandBuffer cmd, const VkExtent2D &size);
     bool onUI();
@@ -48,6 +48,8 @@ private:
     std::unique_ptr<VkDescriptorBufferInfo> m_ireservoir;
     std::unique_ptr<VkDescriptorBufferInfo> m_gbuffer;
     std::unique_ptr<VkDescriptorBufferInfo> m_frameinfo;
+    std::unique_ptr<VkDescriptorBufferInfo> m_sceneinfo;
     std::unique_ptr<VkDescriptorBufferInfo> m_oreservoir;
+    std::unique_ptr<VkDescriptorImageInfo> m_thpimage;
     std::vector<VkWriteDescriptorSet> m_writes;
 };

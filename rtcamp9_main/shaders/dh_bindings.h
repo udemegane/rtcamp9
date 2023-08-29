@@ -26,5 +26,6 @@
 #define B_frameInfo 3
 #define B_sceneDesc 4
 #define B_gbuffer 5
+#define B_outReservoir 6
 
 #endif // !BINDINGS_H
