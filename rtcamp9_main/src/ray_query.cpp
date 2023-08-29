@@ -26,9 +26,14 @@
 //////////////////////////////////////////////////////////////////////////
 
 #include <array>
+#include <thread>
+#include <string>
+#include <filesystem>
 #include <vulkan/vulkan_core.h>
 
 #define VMA_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+
 #include "imgui/imgui_camera_widget.h"
 #include "imgui/imgui_helper.h"
 #include "nvh/primitives.hpp"
@@ -73,6 +78,7 @@ const auto &comp_shd = std::vector<uint32_t>{std::begin(ray_query_comp), std::en
 #include "nvvk/specialization.hpp"
 #include "nvvk/images_vk.hpp"
 #include "nvvk/buffers_vk.hpp"
+#include "stb_image_write.h"
 
 #define GROUP_SIZE 16 // Same group size as in compute shader
 
@@ -242,6 +248,10 @@ public:
           m_light.position = {-8.0F + m_xpos,
                               4.33F,
                               0.0F};
+        }
+        if (ImGui::Button("Save Image"))
+        {
+          m_shouldSaveImage = true;
         }
         PropertyEditor::end();
       }
@@ -539,9 +549,91 @@ public:
                          nullptr, 0, nullptr, 1, &image_memory_barrier);
 
     m_tonemapper->runCompute(cmd, size);
+
+    if (m_shouldSaveImage)
+    {
+      auto image_memory_barrier =
+          nvvk::makeImageMemoryBarrier(m_gBuffers->getColorImage(eImgTonemapped), VK_ACCESS_SHADER_READ_BIT,
+                                       VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+      vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+                           nullptr, 0, nullptr, 1, &image_memory_barrier);
+      if (m_saveImageJob.joinable())
+        m_saveImageJob.join();
+      callSaveImageJob("out.jpg");
+    }
+  }
+
+  void callSaveImageJob(const std::string &outFilename)
+  {
+    const nvh::ScopedTimer s_timer("Save Image\n");
+    // Create a temporary buffer to hold the pixels of the image
+    const VkBufferUsageFlags usage{VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+    const VkDeviceSize buffer_size = 4 * sizeof(uint8_t) * m_gBuffers->getSize().width * m_gBuffers->getSize().height;
+    nvvk::Buffer pixel_buffer = m_alloc->createBuffer(buffer_size, usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+    imageToBuffer(m_gBuffers->getColorImage(eImgTonemapped), pixel_buffer.buffer);
+    // std::thread th(&RayQuery::saveImage, this, pixel_buffer, outFilename);
+
+    std::filesystem::path path = std::filesystem::current_path();
+    auto filePath = path.string() + "/out_images/" + outFilename;
+    // Write the buffer to disk
+    LOGI(" - Size: %d, %d\n", m_gBuffers->getSize().width, m_gBuffers->getSize().height);
+    LOGI(" - Bytes: %d\n", m_gBuffers->getSize().width * m_gBuffers->getSize().height * 4);
+    LOGI(" - Out name: %s\n", filePath.c_str());
+    // const void *data = m_alloc->map(pixel_buffer);
+
+    std::cout << stbi_write_jpg(filePath.c_str(), m_gBuffers->getSize().width, m_gBuffers->getSize().height, 4, reinterpret_cast<uint *>(m_alloc->map(pixel_buffer)), 0) << "\n";
+
+    m_alloc->unmap(pixel_buffer);
+
+    // Destroy temporary buffer
+    m_alloc->destroy(pixel_buffer);
+    m_shouldSaveImage = false;
+    // m_saveImageJob = std::move(th);
   }
 
 private:
+  void saveImage(nvvk::Buffer pixel_buffer, const std::string &outFilename)
+  {
+    std::filesystem::path path = std::filesystem::current_path();
+    auto filePath = path.string() + "/out_images/" + outFilename;
+    // Write the buffer to disk
+    LOGI(" - Size: %d, %d\n", m_gBuffers->getSize().width, m_gBuffers->getSize().height);
+    LOGI(" - Bytes: %d\n", m_gBuffers->getSize().width * m_gBuffers->getSize().height * 4);
+    LOGI(" - Out name: %s\n", filePath.c_str());
+    const void *data = m_alloc->map(pixel_buffer);
+
+    stbi_write_jpg(filePath.c_str(), m_gBuffers->getSize().width, m_gBuffers->getSize().height, 4, data, 0);
+    m_alloc->unmap(pixel_buffer);
+
+    // Destroy temporary buffer
+    m_alloc->destroy(pixel_buffer);
+    m_shouldSaveImage = false;
+  }
+  //--------------------------------------------------------------------------------------------------
+  // Copy the image to a buffer - this linearize the image memory
+  //
+  void imageToBuffer(const VkImage &imgIn, const VkBuffer &pixelBufferOut)
+  {
+    const nvh::ScopedTimer s_timer(" - Image To Buffer");
+
+    auto *cmd = m_app->createTempCmdBuffer();
+
+    // Make the image layout eTransferSrcOptimal to copy to buffer
+    const VkImageSubresourceRange subresource_range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    nvvk::cmdBarrierImageLayout(cmd, imgIn, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, subresource_range);
+
+    // Copy the image to the buffer
+    VkBufferImageCopy copy_region{};
+    copy_region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy_region.imageExtent = VkExtent3D{m_gBuffers->getSize().width, m_gBuffers->getSize().height, 1};
+    vkCmdCopyImageToBuffer(cmd, imgIn, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, pixelBufferOut, 1, &copy_region);
+
+    // Put back the image as it was
+    nvvk::cmdBarrierImageLayout(cmd, imgIn, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, subresource_range);
+    m_app->submitAndWaitTempCmdBuffer(cmd);
+  }
+
   void createScene()
   {
 
@@ -747,7 +839,7 @@ private:
   {
     // Rendering image targets
     m_viewSize = size;
-    std::vector<VkFormat> color_buffers = {m_colorFormat, m_colorFormat, m_colorFormat}; // tonemapped, original
+    std::vector<VkFormat> color_buffers = {m_outColorFormat, m_colorFormat, m_colorFormat}; // tonemapped, original
     m_gBuffers = std::make_unique<nvvkhl::GBuffer>(m_device, m_alloc.get(),
                                                    VkExtent2D{static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y)},
                                                    color_buffers, m_depthFormat);
@@ -1058,6 +1150,7 @@ private:
 
   nvmath::vec2f m_viewSize = {1, 1};
   VkFormat m_colorFormat = VK_FORMAT_R32G32B32A32_SFLOAT; // Color format of the image
+  VkFormat m_outColorFormat = VK_FORMAT_R8G8B8A8_UNORM;   // Color format of the image
   VkFormat m_depthFormat = VK_FORMAT_D32_SFLOAT;          // Depth format of the depth buffer
   VkDevice m_device = VK_NULL_HANDLE;                     // Convenient
   std::unique_ptr<nvvkhl::GBuffer> m_gBuffers;            // G-Buffers: color + depth
@@ -1108,6 +1201,8 @@ private:
   nvvkhl::PipelineContainer m_rtPipe;
 
   bool m_shaderCompile = false;
+  bool m_shouldSaveImage = false;
+  std::thread m_saveImageJob;
 };
 
 //////////////////////////////////////////////////////////////////////////
