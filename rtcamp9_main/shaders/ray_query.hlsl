@@ -255,17 +255,27 @@ float3 getRandomPosition(float3 position, float radius, float2 randomValues)
     return position + newPosition;
 }
 
+void setReconnectionSurface()
+{
+}
+
 //-----------------------------------------------------------------------
 //-----------------------------------------------------------------------
 float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
 {
     float3 radiance = float3(0.0F, 0.0F, 0.0F);
-    // float3 throughput = float3(1.0F, 1.0F, 1.0F);
 
     HitPayload payload;
-    InitialReservoir initRes = make();
+    // InitialReservoir initRes = make();
+
     Reservoir res = initReservoir();
+    Sample s;
+    bool isSampleReady = false;
     float weight = 1.0f;
+    uint initialSeed = seed;
+    float3 sampleThp = float3(0.0f, 0.0f, 0.0f); // 最初はThp無効(0に何かけても0なので)
+
+    float3 thp_v0_to_vc = float3(0.0f, 0.0f, 0.0f); // 検証用 カメラからリコネクション点までのスループットをキャッシュする
 
     // Primary rayは発射済み
     for (int depth = 1; depth < pushConst.maxDepth; depth++)
@@ -318,8 +328,24 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
         pbrMat.emissive = float3(0.0F, 0.0F, 0.0F);
         pbrMat.f0 = lerp(float3(0.04F, 0.04F, 0.04F), pbrMat.albedo.xyz, mat.metallic);
 
+        { // Set GI Sample
+            if (pbrMat.roughness > 0.1 && !isSampleReady)
+            {
+                // radianceは最後までパスとレースしないとわからない
+                s.to.pos = payload.pos;
+                s.to.nrm = payload.nrm;
+                s.primId = payload.instanceIndex;
+                s.k = depth;
+                s.seed = initialSeed;
+                isSampleReady = true;
+                // thpを初期化(有効化)
+                sampleThp = float3(1.0f, 1.0f, 1.0f);
+                thp_v0_to_vc = throughput;
+            }
+        }
+
         float3 contrib = float3(0, 0, 0);
-        float3 in_F = float3(0.0f, 0.0f, 0.0f);
+        float3 Li = float3(0.0f, 0.0f, 0.0f);
 
         // Evaluation of direct light (sun)
         bool nextEventValid = (dot(L, payload.nrm) > 0.0f);
@@ -333,7 +359,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
             const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 100.0) / (distanceToLight * distanceToLight);
             contrib += w * evalData.bsdf_diffuse;
             contrib += w * evalData.bsdf_glossy;
-            in_F = contrib;
+            Li = contrib;
             contrib *= throughput;
         }
 
@@ -350,6 +376,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
             }
 
             throughput *= sampleData.bsdf_over_pdf;
+            sampleThp *= sampleData.bsdf_over_pdf;
 
             ray.Origin = offsetRay(payload.pos, payload.geonrm);
             ray.Direction = sampleData.k2;
@@ -360,6 +387,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
         if (rand(seed) >= rrPcont)
             break;             // paths with low throughput that won't contribute
         throughput /= rrPcont; // boost the energy of the non-terminated paths
+        sampleThp /= rrPcont;
         weight *= rrPcont;
         // We are adding the contribution to the radiance only if the ray is not occluded by an object.
         if (nextEventValid /* && depth != 0*/)
@@ -372,18 +400,21 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
             bool inShadow = traceShadow(shadowRay);
             if (!inShadow)
             {
-                InitialSample s;
-                s.radiance = contrib;
-                s.f = contrib;
-                updateReservoir(initRes, s, weight, rand(seed));
+                // InitialSample s;
+                // s.radiance = contrib;
+                // s.f = contrib;
+                // updateReservoir(initRes, s, weight, rand(seed));
+
+                s.radiance = Li * sampleThp;
+                updateReservoir(res, s, weight, 1, rand(seed));
                 radiance += contrib;
             }
         }
     }
     // return radiance;
 
-    return initRes.wSum;
-    return initRes.s.f * calcContributionWegiht(initRes);
+    // return initRes.wSum - radiance;
+    return (thp_v0_to_vc * res.s.radiance * calcContributionWegiht(res));
 }
 
 float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout uint seed, inout float3 throughput)
@@ -533,7 +564,7 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize)
     float3 thp = float3(1.0f, 1.0f, 1.0f);
     float3 di_radiance = evaluatePrimaryHit(launchID, pixel1d, ray, seed, thp);
     float3 gi_radiance = pathTrace(ray, seed, thp);
-    float3 radiance = di_radiance + gi_radiance;
+    float3 radiance = gi_radiance;
     // float3 radiance2 = pathTrace(ray, seed, float3(1.0f, 1.0f, 1.0f));
     // radiance -= thp;
 
@@ -575,7 +606,7 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result
-    if (true)
+    if (first_frame)
     {                                                // First frame, replace the value in the buffer
         diReservoir[pixel1d].radiance = pixel_color; // gbuffer1d[pixel1d].nrm; // pixel_color;
         // diReservoir[pixel1d].radiance = gbuffer1d[pixel1d].matId; // pixel_color;
