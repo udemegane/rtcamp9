@@ -93,12 +93,16 @@ class RayQuery : public nvvkhl::IAppElement
   };
 
 public:
-  RayQuery() = default;
+  RayQuery(bool auto_render) : m_auto_render(auto_render){};
   ~RayQuery() override = default;
 
   void onAttach(nvvkhl::Application *app) override
   {
+    if (m_auto_render)
+      m_fullscreen = true;
     m_app = app;
+
+    // m_app->
     m_device = m_app->getDevice();
 
     m_compiler = std::make_unique<HLSLShaderCompiler>();
@@ -223,17 +227,23 @@ public:
 
   void onUIRender() override
   {
+    if (!m_fullscreen)
     { // Setting menu
       ImGui::Begin("Settings");
 
       ImGuiH::CameraWidget();
 
       using namespace ImGuiH;
+
       if (ImGui::CollapsingHeader("Compiler", ImGuiTreeNodeFlags_DefaultOpen))
       {
         if (ImGui::Button("Reload Shaders"))
         {
           m_shaderCompile = true;
+        }
+        if (ImGui::Button("Close App"))
+        {
+          m_app->close();
         }
       }
 
@@ -296,6 +306,7 @@ public:
     }
 
     { // Rendering Viewport
+
       ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
       ImGui::Begin("Viewport");
 
@@ -318,28 +329,28 @@ public:
 
       VkAccelerationStructureInstanceKHR &tinst = m_tlas[idx];
       // tinst.transform = nvvk::toTransformMatrixKHR(m_nodes[idx].localMatrix());
-
+      float speed = 10.0f;
       { // Gate 1
         const int i1 = 6;
         const int i2 = 7;
         const int i3 = 8;
 
         m_nodes[i1].rotation = nvmath::slerp_quats(
-            m_frame * (1.0f / 100.0f),
+            m_frame * (speed / 100.0f),
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
         tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
 
         m_nodes[i2].rotation = nvmath::slerp_quats(
-            m_frame * (1.0f / 100.0f),
+            m_frame * (speed / 100.0f),
             nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
         VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
         tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
 
         m_nodes[i3].rotation = nvmath::slerp_quats(
-            m_frame * (1.0f / 100.0f),
+            m_frame * (speed / 100.0f),
             nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
         VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
@@ -352,21 +363,21 @@ public:
         const int i3 = 14;
         const float offset = -1.0f;
         m_nodes[i1].rotation = nvmath::slerp_quats(
-            m_frame * (1.0f / 100.0f) + offset,
+            m_frame * (speed / 100.0f) + offset,
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
         tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
 
         m_nodes[i2].rotation = nvmath::slerp_quats(
-            m_frame * (1.0f / 100.0f) + offset,
+            m_frame * (speed / 100.0f) + offset,
             nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
         VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
         tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
 
         m_nodes[i3].rotation = nvmath::slerp_quats(
-            m_frame * (1.0f / 100.0f) + offset,
+            m_frame * (speed / 100.0f) + offset,
             nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
         VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
@@ -376,7 +387,7 @@ public:
         const int m1 = 15;
         const float offset = -2.0f;
         m_nodes[m1].rotation = nvmath::slerp_quats(
-            m_frame * (1.0f / 100.0f) + offset,
+            m_frame * (speed / 100.0f) + offset,
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, -0.707f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[m1];
@@ -550,7 +561,7 @@ public:
 
     m_tonemapper->runCompute(cmd, size);
 
-    if (m_shouldSaveImage)
+    if (m_shouldSaveImage || m_auto_render)
     {
       auto image_memory_barrier =
           nvvk::makeImageMemoryBarrier(m_gBuffers->getColorImage(eImgTonemapped), VK_ACCESS_SHADER_READ_BIT,
@@ -559,7 +570,11 @@ public:
                            nullptr, 0, nullptr, 1, &image_memory_barrier);
       if (m_saveImageJob.joinable())
         m_saveImageJob.join();
-      callSaveImageJob("out.jpg");
+      callSaveImageJob("out_" + std::to_string(m_frame) + ".jpg");
+      if (m_auto_render && m_frame > 120)
+      {
+        m_app->close();
+      }
     }
   }
 
@@ -572,24 +587,25 @@ public:
     nvvk::Buffer pixel_buffer = m_alloc->createBuffer(buffer_size, usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
     imageToBuffer(m_gBuffers->getColorImage(eImgTonemapped), pixel_buffer.buffer);
-    // std::thread th(&RayQuery::saveImage, this, pixel_buffer, outFilename);
+    std::thread th(&RayQuery::saveImage, this, pixel_buffer, outFilename);
 
-    std::filesystem::path path = std::filesystem::current_path();
-    auto filePath = path.string() + "/out_images/" + outFilename;
-    // Write the buffer to disk
-    LOGI(" - Size: %d, %d\n", m_gBuffers->getSize().width, m_gBuffers->getSize().height);
-    LOGI(" - Bytes: %d\n", m_gBuffers->getSize().width * m_gBuffers->getSize().height * 4);
-    LOGI(" - Out name: %s\n", filePath.c_str());
-    // const void *data = m_alloc->map(pixel_buffer);
+    // std::filesystem::path path = std::filesystem::current_path();
+    // auto filePath = path.string() + "/out_images/" + outFilename;
+    // // Write the buffer to disk
+    // LOGI(" - Size: %d, %d\n", m_gBuffers->getSize().width, m_gBuffers->getSize().height);
+    // LOGI(" - Bytes: %d\n", m_gBuffers->getSize().width * m_gBuffers->getSize().height * 4);
+    // LOGI(" - Out name: %s\n", filePath.c_str());
+    // // const void *data = m_alloc->map(pixel_buffer);
 
-    std::cout << stbi_write_jpg(filePath.c_str(), m_gBuffers->getSize().width, m_gBuffers->getSize().height, 4, reinterpret_cast<uint *>(m_alloc->map(pixel_buffer)), 0) << "\n";
+    // std::cout << stbi_write_jpg(filePath.c_str(), m_gBuffers->getSize().width, m_gBuffers->getSize().height, 4, reinterpret_cast<uint *>(m_alloc->map(pixel_buffer)), 0) << "\n";
 
-    m_alloc->unmap(pixel_buffer);
+    // m_alloc->unmap(pixel_buffer);
 
-    // Destroy temporary buffer
-    m_alloc->destroy(pixel_buffer);
-    m_shouldSaveImage = false;
-    // m_saveImageJob = std::move(th);
+    // // Destroy temporary buffer
+    // m_alloc->destroy(pixel_buffer);
+    // m_shouldSaveImage = false;
+
+    m_saveImageJob = std::move(th);
   }
 
 private:
@@ -831,7 +847,7 @@ private:
     m_pushConst.maxDepth = 5;
     m_pushConst.frame = 0;
     m_pushConst.fireflyClampThreshold = 10;
-    m_pushConst.maxSamples = 10;
+    m_pushConst.maxSamples = m_auto_render ? 30 : 30;
     m_pushConst.light = m_light;
   }
 
@@ -1131,7 +1147,7 @@ private:
 
     m_sbt.destroy();
     m_rtBuilder.destroy();
-    m_tonemapper.reset();
+    // m_tonemapper.reset();
   }
 
   //--------------------------------------------------------------------------------------------------
@@ -1148,7 +1164,7 @@ private:
   std::unique_ptr<PathReuse> m_spatialPathReusePass;
   std::unique_ptr<PathReuse> m_temporalPathReusePass;
 
-  nvmath::vec2f m_viewSize = {1, 1};
+  nvmath::vec2f m_viewSize = {1920, 1080};
   VkFormat m_colorFormat = VK_FORMAT_R32G32B32A32_SFLOAT; // Color format of the image
   VkFormat m_outColorFormat = VK_FORMAT_R8G8B8A8_UNORM;   // Color format of the image
   VkFormat m_depthFormat = VK_FORMAT_D32_SFLOAT;          // Depth format of the depth buffer
@@ -1202,6 +1218,9 @@ private:
 
   bool m_shaderCompile = false;
   bool m_shouldSaveImage = false;
+  bool m_fullscreen = false;
+  bool m_auto_render = false;
+  uint m_anim_count = 0;
   std::thread m_saveImageJob;
 };
 
@@ -1211,6 +1230,17 @@ private:
 ///
 auto main(int argc, char **argv) -> int
 {
+  const std::string logfile = std::string("log_") + std::string(PROJECT_NAME) + std::string(".txt");
+  nvprintSetLogFileName(logfile.c_str());
+  nvh::CommandLineParser parser("RTCamp9 Render");
+  bool auto_render = false;
+  parser.addArgument({"-a", "--auto"}, &auto_render, "本番");
+  if (!parser.parse(argc, argv))
+  {
+    parser.printHelp();
+    return 1;
+  }
+
   nvvkhl::ApplicationCreateInfo spec;
   spec.name = PROJECT_NAME " Example";
   spec.vSync = false;
@@ -1234,7 +1264,6 @@ auto main(int argc, char **argv) -> int
 
   // Create the application
   auto app = std::make_unique<nvvkhl::Application>(spec);
-
   // Create the test framework
   auto test = std::make_shared<nvvkhl::ElementTesting>(argc, argv);
 
@@ -1243,7 +1272,7 @@ auto main(int argc, char **argv) -> int
   app->addElement(std::make_shared<nvvkhl::ElementCamera>());
   app->addElement(std::make_shared<nvvkhl::ElementDefaultMenu>());        // Menu / Quit
   app->addElement(std::make_shared<nvvkhl::ElementDefaultWindowTitle>()); // Window title info
-  app->addElement(std::make_shared<RayQuery>());
+  app->addElement(std::make_shared<RayQuery>(auto_render));
 
   app->run();
   app.reset();
