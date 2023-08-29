@@ -257,7 +257,7 @@ float3 getRandomPosition(float3 position, float radius, float2 randomValues)
 
 //-----------------------------------------------------------------------
 //-----------------------------------------------------------------------
-float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
+float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput, bool useGBuffer, uint pixel1d)
 {
     float3 radiance = float3(0.0F, 0.0F, 0.0F);
     // float3 throughput = float3(1.0F, 1.0F, 1.0F);
@@ -266,9 +266,28 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
     InitialReservoir initRes = make();
     Reservoir res = initReservoir();
     float weight = 1.0f;
-    for (int depth = 0; depth < pushConst.maxDepth; depth++)
+
+    for (int depth = 1; depth < pushConst.maxDepth; depth++)
     {
-        traceRay(ray, payload);
+        int matID;
+        if (useGBuffer && depth == 0)
+        {
+            GBufStruct gbuf = gbuffer1d[pixel1d];
+
+            payload.nrm = gbuf.nrm;
+            payload.pos = gbuf.pos;
+            payload.hitT = gbuf.hitT;
+            payload.geonrm = gbuf.nrm;
+            matID = gbuf.matId;
+        }
+        else
+        {
+            // Retrieve the Instance buffer information
+            traceRay(ray, payload);
+            uint64_t materialIDOffest = sizeof(float4x4);
+            uint64_t instOffset = sizeof(InstanceInfo) * payload.instanceIndex;
+            matID = vk::RawBufferLoad<int>(sceneDesc[0].instInfoAddress + instOffset + materialIDOffest);
+        }
 
         // Hitting the environment, then exit
         if (payload.hitT == INFINITE)
@@ -278,10 +297,6 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
             return radiance + (sky_color * throughput);
         }
 
-        // Retrieve the Instance buffer information
-        uint64_t materialIDOffest = sizeof(float4x4);
-        uint64_t instOffset = sizeof(InstanceInfo) * payload.instanceIndex;
-        int matID = vk::RawBufferLoad<int>(sceneDesc[0].instInfoAddress + instOffset + materialIDOffest);
         float3 lightPos = getRandomPosition(pushConst.light.position, pushConst.light.radius, float2(rand(seed), rand(seed)));
         float distanceToLight = length(lightPos - payload.pos);
 
@@ -334,8 +349,6 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
             }
 
             throughput *= sampleData.bsdf_over_pdf;
-            return sampleData.bsdf_over_pdf;
-            return throughput;
 
             ray.Origin = offsetRay(payload.pos, payload.geonrm);
             ray.Direction = sampleData.k2;
@@ -366,92 +379,114 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
             }
         }
     }
-    // return radiance;
+    return radiance;
 
     return initRes.wSum;
     return initRes.s.f * calcContributionWegiht(initRes);
 }
 
-float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, const float3 rayDir, inout uint seed)
+float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout uint seed, inout float3 throughput)
 {
-    if (gbuffer1d[pixel1d].hitT >= INFINITE)
+    float3 radiance = float3(0.0F, 0.0F, 0.0F);
+    // float3 throughput = float3(1.0F, 1.0F, 1.0F);
+
+    HitPayload payload;
+    InitialReservoir initRes = make();
+    Reservoir res = initReservoir();
+    float weight = 1.0f;
+
+    int matID;
+    // if (useGBuffer && depth == 0)
+    // {
+    GBufStruct gbuf = gbuffer1d[pixel1d];
+    payload.nrm = gbuf.nrm;
+    payload.pos = gbuf.pos;
+    payload.hitT = gbuf.hitT;
+    payload.geonrm = gbuf.nrm;
+    matID = gbuf.matId;
+    // }
+    // else
+    // {
+    //     // Retrieve the Instance buffer information
+    //     traceRay(ray, payload);
+    //     uint64_t materialIDOffest = sizeof(float4x4);
+    //     uint64_t instOffset = sizeof(InstanceInfo) * payload.instanceIndex;
+    //     matID = vk::RawBufferLoad<int>(sceneDesc[0].instInfoAddress + instOffset + materialIDOffest);
+    // }
+
+    // Hitting the environment, then exit
+    if (payload.hitT == INFINITE)
     {
 
         float3 sky_color = float3(0.1, 0.1, 0.20); // Light blue grey
-        return sky_color;
+        return radiance + (sky_color * throughput);
     }
-    float3 di_radiance = float3(0.0f, 0.0f, 0.0f);
-    float3 throughput = float3(1.0f, 1.0f, 1.0f);
-    float weight = 0.0f;
 
-    GBufStruct gbuf = gbuffer1d[pixel1d];
-    uint64_t matOffset = sizeof(Material) * gbuf.matId;
+    float3 lightPos = getRandomPosition(pushConst.light.position, pushConst.light.radius, float2(rand(seed), rand(seed)));
+    float distanceToLight = length(lightPos - payload.pos);
+
+    float pdf = 0.0F;
+    float3 V = -ray.Direction;
+    float3 L = normalize(lightPos - payload.pos);
+
+    // Retrieve the material color
+    uint64_t matOffset = sizeof(Material) * matID;
     Material mat = getMaterial(sceneDesc[0].materialAddress, matOffset);
+
     // Setting up the material
     PbrMaterial pbrMat;
     pbrMat.albedo = float4(mat.albedo, 1);
     pbrMat.roughness = mat.roughness;
     pbrMat.metallic = mat.metallic;
-    pbrMat.normal = gbuf.nrm;
+    pbrMat.normal = payload.nrm;
     pbrMat.emissive = float3(0.0F, 0.0F, 0.0F);
     pbrMat.f0 = lerp(float3(0.04F, 0.04F, 0.04F), pbrMat.albedo.xyz, mat.metallic);
 
     float3 contrib = float3(0, 0, 0);
+    float3 in_F = float3(0.0f, 0.0f, 0.0f);
 
     // Evaluation of direct light (sun)
-    // Direct Illumination evaluation
-    float pdf = 0.0F;
-    float3 lightPos = getRandomPosition(pushConst.light.position, pushConst.light.radius, float2(rand(seed), rand(seed)));
-    float distanceToLight = length(lightPos - gbuf.pos);
-    float3 V = -rayDir;
-    float3 L = normalize(lightPos - gbuf.pos);
-    bool nextEventValid = (dot(L, gbuf.nrm) > 0.0f);
+    bool nextEventValid = (dot(L, payload.nrm) > 0.0f);
     if (nextEventValid)
     {
         BsdfEvaluateData evalData;
-        evalData.k1 = -rayDir;
+        evalData.k1 = -ray.Direction;
         evalData.k2 = L;
         bsdfEvaluate(evalData, pbrMat);
 
         const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 100.0) / (distanceToLight * distanceToLight);
         contrib += w * evalData.bsdf_diffuse;
         contrib += w * evalData.bsdf_glossy;
+        in_F = contrib;
+        contrib *= throughput;
     }
 
-    RayDesc ray;
-    ray.TMin = 0.001;
-    ray.TMax = INFINITE;
     // Sample BSDF
     {
         BsdfSampleData sampleData;
-        sampleData.k1 = -rayDir;                                                // outgoing direction
+        sampleData.k1 = -ray.Direction;                                         // outgoing direction
         sampleData.xi = float4(rand(seed), rand(seed), rand(seed), rand(seed)); // 4つめは今の実装だといらん
 
         bsdfSample(sampleData, pbrMat);
         if (sampleData.event_type == BSDF_EVENT_ABSORB)
         {
-            return di_radiance;
+            return radiance;
             // break; // Need to add the contribution ?
         }
 
         throughput *= sampleData.bsdf_over_pdf;
-        return sampleData.bsdf_over_pdf;
-        return throughput;
-        ray.Origin = offsetRay(gbuf.pos, gbuf.nrm * 2.0f);
+
+        ray.Origin = offsetRay(payload.pos, payload.geonrm);
         ray.Direction = sampleData.k2;
     }
 
-    {
-        /* rrPcont is always 1 on primary hit. */
-
-        // Russian-Roulette (minimizing live state)
-        float rrPcont = min(max(throughput.x, max(throughput.y, throughput.z)) + 0.001F, 0.95F);
-        if (rand(seed) >= rrPcont)
-            return di_radiance; // paths with low throughput that won't contribute
-        throughput /= rrPcont;  // boost the energy of the non-terminated paths
-        weight *= rrPcont;
-    }
-
+    // Russian-Roulette (minimizing live state)
+    float rrPcont = min(max(throughput.x, max(throughput.y, throughput.z)) + 0.001F, 0.95F);
+    if (rand(seed) >= rrPcont)
+        return radiance;
+    // break;             // paths with low throughput that won't contribute
+    throughput /= rrPcont; // boost the energy of the non-terminated paths
+    weight *= rrPcont;
     // We are adding the contribution to the radiance only if the ray is not occluded by an object.
     if (nextEventValid)
     {
@@ -464,20 +499,13 @@ float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, const float3 rayDir, inout 
         if (!inShadow)
         {
             InitialSample s;
-            // s.radiance = contrib;
-            // s.f = contrib;
-            // updateReservoir(initRes, s, weight, rand(seed));
-            di_radiance += contrib;
+            s.radiance = contrib;
+            s.f = contrib;
+            updateReservoir(initRes, s, weight, rand(seed));
+            radiance += contrib;
         }
     }
-
-    // return ray.Direction;
-    // pbrMat mat;
-    float3 gi_radiance = pathTrace(ray, seed, throughput);
-    // return float(k) / 5.0f;
-    // return di_radiance;
-    return gi_radiance;
-    return di_radiance + gi_radiance;
+    return radiance;
 }
 
 //-----------------------------------------------------------------------
@@ -494,16 +522,18 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize)
     float3 rayDir = mul(frameInfo.viewInv, float4(normalize(target.xyz), 0.0)).xyz;
 
     uint pixel1d = launchID.x + launchSize.x * launchID.y;
-    float3 thp = evaluatePrimaryHit(launchID, pixel1d, rayDir, seed);
+    // float3 thp = evaluatePrimaryHit(launchID, pixel1d, rayDir, seed);
 
     RayDesc ray;
     ray.Origin = mul(frameInfo.viewInv, float4(0.0, 0.0, 0.0, 1.0)).xyz;
     ray.Direction = rayDir;
     ray.TMin = 0.001;
     ray.TMax = INFINITE;
-    
-    float3 radiance = pathTrace(ray, seed, float3(1.0f, 1.0f, 1.0f));
-    radiance -= thp;
+    float3 thp = float3(1.0f, 1.0f, 1.0f);
+    float3 di_radiance = evaluatePrimaryHit(launchID, pixel1d, ray, seed, thp);
+    float3 radiance = pathTrace(ray, seed, thp, false, pixel1d);
+    // float3 radiance2 = pathTrace(ray, seed, float3(1.0f, 1.0f, 1.0f));
+    // radiance -= thp;
 
     // Removing fireflies
     float lum = dot(radiance, float3(0.212671F, 0.715160F, 0.072169F));
