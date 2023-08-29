@@ -257,7 +257,7 @@ float3 getRandomPosition(float3 position, float radius, float2 randomValues)
 
 //-----------------------------------------------------------------------
 //-----------------------------------------------------------------------
-float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput, bool useGBuffer, uint pixel1d)
+float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput)
 {
     float3 radiance = float3(0.0F, 0.0F, 0.0F);
     // float3 throughput = float3(1.0F, 1.0F, 1.0F);
@@ -267,20 +267,21 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput, bool useGBuffe
     Reservoir res = initReservoir();
     float weight = 1.0f;
 
+    // Primary rayは発射済み
     for (int depth = 1; depth < pushConst.maxDepth; depth++)
     {
         int matID;
-        if (useGBuffer && depth == 0)
-        {
-            GBufStruct gbuf = gbuffer1d[pixel1d];
+        // if (useGBuffer && depth == 0)
+        // {
+        //     GBufStruct gbuf = gbuffer1d[pixel1d];
 
-            payload.nrm = gbuf.nrm;
-            payload.pos = gbuf.pos;
-            payload.hitT = gbuf.hitT;
-            payload.geonrm = gbuf.nrm;
-            matID = gbuf.matId;
-        }
-        else
+        //     payload.nrm = gbuf.nrm;
+        //     payload.pos = gbuf.pos;
+        //     payload.hitT = gbuf.hitT;
+        //     payload.geonrm = gbuf.nrm;
+        //     matID = gbuf.matId;
+        // }
+        // else
         {
             // Retrieve the Instance buffer information
             traceRay(ray, payload);
@@ -361,7 +362,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput, bool useGBuffe
         throughput /= rrPcont; // boost the energy of the non-terminated paths
         weight *= rrPcont;
         // We are adding the contribution to the radiance only if the ray is not occluded by an object.
-        if (nextEventValid && depth != 0)
+        if (nextEventValid /* && depth != 0*/)
         {
             RayDesc shadowRay;
             shadowRay.Origin = ray.Origin;
@@ -379,7 +380,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, float3 throughput, bool useGBuffe
             }
         }
     }
-    return radiance;
+    // return radiance;
 
     return initRes.wSum;
     return initRes.s.f * calcContributionWegiht(initRes);
@@ -531,7 +532,8 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize)
     ray.TMax = INFINITE;
     float3 thp = float3(1.0f, 1.0f, 1.0f);
     float3 di_radiance = evaluatePrimaryHit(launchID, pixel1d, ray, seed, thp);
-    float3 radiance = pathTrace(ray, seed, thp, false, pixel1d);
+    float3 gi_radiance = pathTrace(ray, seed, thp);
+    float3 radiance = di_radiance + gi_radiance;
     // float3 radiance2 = pathTrace(ray, seed, float3(1.0f, 1.0f, 1.0f));
     // radiance -= thp;
 
