@@ -26,6 +26,7 @@
 //////////////////////////////////////////////////////////////////////////
 
 #include <array>
+#include <queue>
 #include <thread>
 #include <string>
 #include <filesystem>
@@ -93,7 +94,10 @@ class RayQuery : public nvvkhl::IAppElement
   };
 
 public:
-  RayQuery(bool auto_render) : m_auto_render(auto_render){};
+  RayQuery(bool auto_render, uint spp) : m_auto_render(auto_render)
+  {
+    m_pushConst.maxSamples = spp;
+  };
   ~RayQuery() override = default;
 
   void onAttach(nvvkhl::Application *app) override
@@ -568,11 +572,19 @@ public:
                                        VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
       vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
                            nullptr, 0, nullptr, 1, &image_memory_barrier);
-      if (m_saveImageJob.joinable())
-        m_saveImageJob.join();
+      if (m_saveImageJobs.size() > 300 && m_saveImageJobs.front().joinable())
+      {
+        m_saveImageJobs.front().join();
+        m_saveImageJobs.pop();
+      }
       callSaveImageJob("out_" + std::to_string(m_frame) + ".jpg");
       if (m_auto_render && m_frame > 120)
       {
+        while (!m_saveImageJobs.empty())
+        {
+          m_saveImageJobs.front().join();
+          m_saveImageJobs.pop();
+        }
         m_app->close();
       }
     }
@@ -589,23 +601,7 @@ public:
     imageToBuffer(m_gBuffers->getColorImage(eImgTonemapped), pixel_buffer.buffer);
     std::thread th(&RayQuery::saveImage, this, pixel_buffer, outFilename);
 
-    // std::filesystem::path path = std::filesystem::current_path();
-    // auto filePath = path.string() + "/out_images/" + outFilename;
-    // // Write the buffer to disk
-    // LOGI(" - Size: %d, %d\n", m_gBuffers->getSize().width, m_gBuffers->getSize().height);
-    // LOGI(" - Bytes: %d\n", m_gBuffers->getSize().width * m_gBuffers->getSize().height * 4);
-    // LOGI(" - Out name: %s\n", filePath.c_str());
-    // // const void *data = m_alloc->map(pixel_buffer);
-
-    // std::cout << stbi_write_jpg(filePath.c_str(), m_gBuffers->getSize().width, m_gBuffers->getSize().height, 4, reinterpret_cast<uint *>(m_alloc->map(pixel_buffer)), 0) << "\n";
-
-    // m_alloc->unmap(pixel_buffer);
-
-    // // Destroy temporary buffer
-    // m_alloc->destroy(pixel_buffer);
-    // m_shouldSaveImage = false;
-
-    m_saveImageJob = std::move(th);
+    m_saveImageJobs.push(std::move(th));
   }
 
 private:
@@ -847,7 +843,7 @@ private:
     m_pushConst.maxDepth = 5;
     m_pushConst.frame = 0;
     m_pushConst.fireflyClampThreshold = 10;
-    m_pushConst.maxSamples = m_auto_render ? 30 : 30;
+    // m_pushConst.maxSamples = m_auto_render ? 30 : 30;
     m_pushConst.light = m_light;
   }
 
@@ -1221,7 +1217,7 @@ private:
   bool m_fullscreen = false;
   bool m_auto_render = false;
   uint m_anim_count = 0;
-  std::thread m_saveImageJob;
+  std::queue<std::thread> m_saveImageJobs;
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -1234,7 +1230,9 @@ auto main(int argc, char **argv) -> int
   nvprintSetLogFileName(logfile.c_str());
   nvh::CommandLineParser parser("RTCamp9 Render");
   bool auto_render = false;
+  uint spp = 50;
   parser.addArgument({"-a", "--auto"}, &auto_render, "本番");
+  parser.addArgument({"-s", "--spp"}, &spp, "サンプル数");
   if (!parser.parse(argc, argv))
   {
     parser.printHelp();
@@ -1272,7 +1270,7 @@ auto main(int argc, char **argv) -> int
   app->addElement(std::make_shared<nvvkhl::ElementCamera>());
   app->addElement(std::make_shared<nvvkhl::ElementDefaultMenu>());        // Menu / Quit
   app->addElement(std::make_shared<nvvkhl::ElementDefaultWindowTitle>()); // Window title info
-  app->addElement(std::make_shared<RayQuery>(auto_render));
+  app->addElement(std::make_shared<RayQuery>(auto_render, spp));
 
   app->run();
   app.reset();
