@@ -35,7 +35,7 @@ float3 resamplePixel(float3 rayDir, inout uint seed, uint2 pixel, float2 launchS
 {
     Reservoir centerRes = unpack(packedInReservoir[pixel1d]);
     GBufStruct gbuf = gbuffer1d[pixel1d];
-    float3 radiance = float3(0.0f, 0.0f, 0.0f);
+    float3 v1Thp = float3(0.0f, 0.0f, 0.0f);
 
     // Retrieve the material color
     uint64_t matOffset = sizeof(Material) * gbuf.matId;
@@ -60,11 +60,44 @@ float3 resamplePixel(float3 rayDir, inout uint seed, uint2 pixel, float2 launchS
         bsdfSample(sampleData, pbrMat);
         if (sampleData.event_type == BSDF_EVENT_ABSORB)
         {
-            return radiance;
+            ;
             // break; // Need to add the contribution ?
         }
-        return sampleData.bsdf_over_pdf;
+        v1Thp = sampleData.bsdf_over_pdf;
     }
+    if (centerRes.s.k == 1 && false)
+    {
+        uint seed2 = seed;
+        for (int i = 1; i < 18; i++)
+        {
+            float radius = 12 * rand(seed2);
+            float angle = M_2PI * rand(seed2);
+            uint2 neighbor = {
+                clamp(pixel.x + uint(radius * cos(angle)), 0, launchSize.x), clamp(pixel.y + uint(radius * sin(angle)), 0, launchSize.y)
+            };
+            uint neighbor1d = neighbor.x + launchSize.x * neighbor.y;
+            Reservoir ri = unpack(packedInReservoir[neighbor1d]);
+            if (ri.s.k != 1)
+                continue;
+            float inv_p = ri.w / toScalar(ri.s.p_hat_xi);
+            Sample Ts;
+            {
+                Ts.k = ri.s.k;
+                Ts.seed = ri.s.seed;
+                Ts.to = ri.s.to;
+                Ts.primId = ri.s.primId;
+
+                Ts.p_hat_xi = ri.s.p_hat_cached * v1Thp; // TODO:
+                Ts.p_hat_cached = ri.s.p_hat_cached;
+            }
+            float w = toScalar(Ts.p_hat_xi) * inv_p;
+
+            updateReservoir(centerRes, Ts, w, 0, rand(seed2));
+        }
+    }
+
+    packedOutReservoir[pixel1d] = pack(centerRes);
+    return v1Thp;
 }
 
 [shader("compute")]
@@ -90,6 +123,5 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     float3 rayDir = mul(frameInfo.viewInv, float4(normalize(target.xyz), 0.0)).xyz;
 
     float3 thp = resamplePixel(rayDir, seed, pixel, imgSize, pixel1d);
-    packedOutReservoir[pixel1d] = packedInReservoir[pixel1d];
     thpOutImage[pixel] = float4(thp, 1.0f);
 }

@@ -1,11 +1,12 @@
 #include "dh_vis_binding.h"
 
 #include "constants.hlsli"
+#include "device_host.h"
 #include "dh_reservoir.hlsl"
 #include "reservoir.hlsl"
 
-[[vk::push_constant]]
-ConstantBuffer<DBGConstant> pushConst;
+// [[vk::push_constant]]
+// ConstantBuffer<PushConstant> pushConst;
 [[vk::binding(eDebugPassInput)]]
 RWStructuredBuffer<DIReservoir> gRes;
 [[vk::binding(B_compose_giInput)]]
@@ -26,23 +27,32 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     if (pixel.x >= imgSize.x || pixel.y >= imgSize.y)
         return;
     uint pixel1D = pixel.x + imgSize.x * pixel.y;
-    gOutImage[pixel] = float4(gRes[pixel1D].radiance, 1.0f);
     Reservoir centerRes = unpack(packedGiRes[pixel1D]);
-    float3 rad = thpInImage[pixel].xyz * centerRes.s.radiance * calcContributionWegiht(centerRes);
+    // float3 rad = thpInImage[pixel].xyz * centerRes.s.p_hat_xi * calcContributionWegiht(centerRes);
+    // gOutImage[pixel] = float4(thpInImage[pixel].xyz * centerRes.s.p_hat_cached * calcContributionWegiht(centerRes), 1.0f);
 
-    if (/*pixel.x >  imgSize.x / 2*/ true)
+    bool reuseOk = centerRes.s.k == 1;
+    // float k = centerRes.s.k;
+    // float3 tmp = float3(k / 5, k / 5, k / 5);
+    // gOutImage[pixel] = float4(tmp, 1.0f);
+    // return;
+    float3 outColor;
+    if (true)
     {
-        gOutImage[pixel] = float4(gRes[pixel1D].radiance, 1.0f);
+        outColor = gRes[pixel1D].radiance;
+        // outColor /= pushConst.maxSamples;
+        // outColor = centerRes.s.p_hat_xi;
     }
     else
     {
-        // thp違う
-        //
-        // gOutImage[pixel] = thpInImage[pixel];
-        // radiance も違う
-        // gOutImage[pixel] = float4(centerRes.s.radiance, 1.0f);
-        float tmp = calcContributionWegiht(centerRes);
-        gOutImage[pixel] = float4(tmp, tmp, tmp, 1.0f);
+        float3 reconstructRad = thpInImage[pixel].xyz * centerRes.s.p_hat_cached * calcContributionWegiht(centerRes);
+        outColor = reconstructRad;
     }
-    // gOutImage[pixel] = float4(thpInImage[pixel].xyz, 1.0f);
+
+    // float lum = dot(outColor, float3(0.212671F, 0.715160F, 0.072169F));
+    // if (lum > pushConst.fireflyClampThreshold)
+    // {
+    //     outColor *= pushConst.fireflyClampThreshold / lum;
+    // }
+    gOutImage[pixel] = float4(outColor, 1.0f);
 }

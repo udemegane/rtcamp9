@@ -32,10 +32,11 @@ struct DIReservoir
 
 struct PackedReservoir
 {
-    // 32bit x 16 = 64B
+    // 32bit x 20 = 80B
     vec3 pos;
     vec3 nrm;
     vec3 rad;
+    vec3 radTmp;
     int primId;
     uint k;
     uint seed;
@@ -43,4 +44,5 @@ struct PackedReservoir
     float wSum;
     uint M;
     uint _dummy;
+    uint _dummy2;
 };

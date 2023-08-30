@@ -263,15 +263,20 @@ void setReconnectionSurface()
 
 //-----------------------------------------------------------------------
 //-----------------------------------------------------------------------
-float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput, uint pixel1d)
+float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput, uint pixel1d, inout Reservoir res)
 {
     float3 radiance = float3(0.0F, 0.0F, 0.0F);
 
     HitPayload payload;
     // InitialReservoir initRes = make();
 
-    Reservoir res = initReservoir();
     Sample s;
+    {
+        s.k = 0;
+        s.primId = -1;
+        s.p_hat_xi = float3(0.0f, 0.0f, 0.0f);
+        s.seed = initSeed;
+    }
     uint seed2 = seed;
     bool isSampleReady = false;
     float pathAliveP = 1.0f;
@@ -280,6 +285,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
     float3 LoCache = float3(0.0f, 0.0f, 0.0f);
     float3 thp_v0_to_vc = float3(0.0f, 0.0f, 0.0f); // 検証用 カメラからリコネクション点までのスループットをキャッシュする
 
+    uint M = res.M;
     // Primary rayは発射済み
     for (int depth = 1; depth < pushConst.maxDepth; depth++)
     {
@@ -359,8 +365,8 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
             evalData.k1 = -ray.Direction;
             evalData.k2 = L;
             bsdfEvaluate(evalData, pbrMat);
-
-            const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 500.0) / (distanceToLight * distanceToLight);
+            //  +
+            const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 100.0) / (distanceToLight * distanceToLight);
             contrib += w * evalData.bsdf_diffuse;
             contrib += w * evalData.bsdf_glossy;
             Lo = contrib;
@@ -410,41 +416,26 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
                 // updateReservoir(initRes, s, pathAliveP, rand(seed));
                 if (isSampleReady)
                 {
-                    s.radiance = contrib;
-                    float w = toScalar(s.radiance) / pathAliveP;
+                    s.p_hat_xi = contrib;
+                    s.p_hat_cached = Lo * sampleThp;
+                    float w = toScalar(s.p_hat_xi) / pathAliveP;
                     updateReservoir(res, s, w, rand(seed2));
                 }
                 radiance += contrib;
             }
         }
+        res.M = M;
     }
+    res.M++;
+    // float3 thp2 = isSampleReady ? sampleThp * thp_v0_to_vc : throughput;
+    // return float3(isSampleReady, isSampleReady, isSampleReady);
 
-    float3 thp2 = false ? sampleThp * thp_v0_to_vc : throughput;
-    float3 tmp = throughput;
-    // return radiance;
+    // return throughput - thp2;
+    return radiance;
     // return res.s.radiance;
     // return throughput - thp_v0_to_vc;
-    if (all(tmp == throughput))
-    {
-        thp2 = float3(1.0f, 0.0f, 0.0f);
-    }
-    else
-    {
-        thp2 = float3(0.0f, 0.0f, 1.0f);
-    }
-    return thp2;
 
-    return res.s.radiance * calcContributionWegiht(res);
-
-    packedReservoir[pixel1d] = pack(res);
-    // return (thp_v0_to_vc * res.s.radiance * calcContributionWegiht(res));
-
-    // return initRes.wSum - radiance;
-    float W = calcContributionWegiht(res);
-
-    return float3(0.0f, 0.0f, 0.0f); // float3(W, W, W);
-    // return res.s.radiance;
-    // return thp_v0_to_vc;
+    return res.s.p_hat_xi * calcContributionWegiht(res);
 }
 
 float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout uint seed, out uint initSeed, inout float3 throughput)
@@ -574,7 +565,7 @@ float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout ui
 //-----------------------------------------------------------------------
 // Sampling the pixel
 //-----------------------------------------------------------------------
-float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize)
+float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize, inout Reservoir res)
 {
     // Subpixel jitter: send the ray through a different position inside the pixel each time, to provide antialiasing.
     const float2 subpixel_jitter = pushConst.frame == 0 ? float2(0.5f, 0.5f) : float2(rand(seed), rand(seed));
@@ -595,7 +586,7 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize)
     float3 thp = float3(1.0f, 1.0f, 1.0f);
     uint initSeed;
     float3 di_radiance = evaluatePrimaryHit(launchID, pixel1d, ray, seed, initSeed, thp);
-    float3 gi_radiance = pathTrace(ray, seed, initSeed, thp, pixel1d);
+    float3 gi_radiance = pathTrace(ray, seed, initSeed, thp, pixel1d, res);
     float3 radiance = gi_radiance;
 
     // Removing fireflies
@@ -629,10 +620,13 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
 
     // Sampling n times the pixel
     float3 pixel_color = float3(0.0F, 0.0F, 0.0F);
+    Reservoir res = initReservoir();
     for (int s = 0; s < pushConst.maxSamples; s++)
     {
-        pixel_color += samplePixel(seed, launchID, (float2)imgSize);
+        pixel_color += samplePixel(seed, launchID, (float2)imgSize, res);
     }
+    packedReservoir[pixel1d] = pack(res);
+
     pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result

@@ -17,11 +17,12 @@ struct RcVertex
 struct Sample
 {
     // RcVertex from; // Reconnection-able origin Vertex V_{k-1}
-    RcVertex to;     // Reconnection-able destination Vertex V_k
-    int primId;      //
-    float3 radiance; // cached radiance of contribution from V_emit to V_k.
-    uint k;          // Index of Reconnection-able Vertex
-    uint seed;       // seed of puesdo random generator
+    RcVertex to;         // Reconnection-able destination Vertex V_k
+    int primId;          //
+    float3 p_hat_xi;     // radiance of contribution from V_emit to V_0.
+    float3 p_hat_cached; // cached radiance of contribution from V_emit to V_k
+    uint k;              // Index of Reconnection-able Vertex
+    uint seed;           // seed of puesdo random generator
     // float3 u1;       // 3 random [0,1] for BSDF Random-Replay Sampling of Voffset_{k-2}, which was generated and used Vbase_{k-2}. (Ideally should we cache all randoms from Vbase_1 to Vbase_{k-2}?)
     // float3 u2;       // 3 random [0,1] for BSDF Sampling of V_k. If scene objects is dynamic, you need to launch shadow ray from V_k with this.
 };
@@ -67,7 +68,7 @@ Reservoir initReservoir()
     Sample s;
     s.k = 0;
     s.seed = 0;
-    s.radiance = float3(0.0f, 0.0f, 0.0f);
+    s.p_hat_xi = float3(0.0f, 0.0f, 0.0f);
     s.primId = -1;
     s.to.nrm = float3(1.0f, 0.0f, 0.0f);
     s.to.pos = float3(0.0f, 0.0f, 0.0f);
@@ -171,8 +172,8 @@ void capReservoir(inout Reservoir r)
 
 float calcContributionWegiht(Reservoir r)
 {
-    float p_hat = length(r.s.radiance);
-    return p_hat == 0.0f ? 0.0f : (r.wSum / (p_hat + FLT_EPSILON));
+    float p_hat = length(r.s.p_hat_xi);
+    return p_hat == 0.0f ? 0.0f : (r.wSum / (r.M * (p_hat + FLT_EPSILON)));
 }
 
 // bool updateReservoir(inout DIReservoir r, in Sample)
@@ -205,7 +206,8 @@ PackedReservoir pack(Reservoir r)
     PackedReservoir pr;
     pr.pos = r.s.to.pos;
     pr.nrm = r.s.to.nrm;
-    pr.rad = r.s.radiance;
+    pr.rad = r.s.p_hat_xi;
+    pr.radTmp = r.s.p_hat_cached;
     pr.primId = r.s.primId;
     pr.k = r.s.k;
     pr.seed = r.s.seed;
@@ -221,7 +223,8 @@ Reservoir unpack(PackedReservoir pr)
     Reservoir r;
     r.s.to.pos = pr.pos;
     r.s.to.nrm = pr.nrm;
-    r.s.radiance = pr.rad;
+    r.s.p_hat_xi = pr.rad;
+    r.s.p_hat_cached = pr.radTmp;
     r.s.primId = pr.primId;
     r.s.k = pr.k;
     r.s.seed = pr.seed;
