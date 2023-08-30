@@ -23,6 +23,8 @@ void PathReuse::createPipelineLayout()
     m_dset->addBinding(B_reuse_outReservoir, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL);
     m_dset->addBinding(B_reuse_scenedesc, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL);
     m_dset->addBinding(B_reuse_outThp, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+    if (m_type == EResampleType::Temporal)
+        m_dset->addBinding(B_reuse_oldReservoir, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL);
 
     m_dset->initLayout(VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
 
@@ -82,6 +84,27 @@ void PathReuse::updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, 
     m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_frameinfo, m_frameinfo.get()));
     m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_scenedesc, m_sceneinfo.get()));
     m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_outThp, m_thpimage.get()));
+}
+
+void PathReuse::updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorBufferInfo midReservoir, VkDescriptorBufferInfo outReservoir, VkDescriptorBufferInfo gbuffer, VkDescriptorImageInfo thpImage, VkDescriptorBufferInfo frameInfo, VkDescriptorBufferInfo sceneInfo)
+{
+    m_ireservoir = std::make_unique<VkDescriptorBufferInfo>(inReservoir);
+    if (m_type == EResampleType::Temporal)
+        m_mreservoir = std::make_unique<VkDescriptorBufferInfo>(midReservoir);
+    m_gbuffer = std::make_unique<VkDescriptorBufferInfo>(gbuffer);
+    m_frameinfo = std::make_unique<VkDescriptorBufferInfo>(frameInfo);
+    m_sceneinfo = std::make_unique<VkDescriptorBufferInfo>(sceneInfo);
+    m_oreservoir = std::make_unique<VkDescriptorBufferInfo>(outReservoir);
+    m_thpimage = std::make_unique<VkDescriptorImageInfo>(thpImage);
+    m_writes.clear();
+    m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_inReservoir, m_ireservoir.get()));
+    m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_outReservoir, m_oreservoir.get()));
+    m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_gbuffer, m_gbuffer.get()));
+    m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_frameinfo, m_frameinfo.get()));
+    m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_scenedesc, m_sceneinfo.get()));
+    m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_outThp, m_thpimage.get()));
+    if (m_type == EResampleType::Temporal)
+        m_writes.emplace_back(m_dset->makeWrite(0, B_reuse_oldReservoir, m_mreservoir.get()));
 }
 
 void PathReuse::updateConstants(const VkExtent2D &size)

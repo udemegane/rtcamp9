@@ -8,5 +8,6 @@
 #define B_reuse_scenedesc 3
 #define B_reuse_outReservoir 4
 #define B_reuse_outThp 5
+#define B_reuse_oldReservoir 6
 
 #endif

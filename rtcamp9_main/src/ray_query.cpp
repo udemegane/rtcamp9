@@ -120,12 +120,13 @@ public:
     m_resVisualizer = std::make_unique<VisualizeReservoir>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
     m_gbufferPass = std::make_unique<GBuffer>(m_app->getContext().get(), m_alloc.get(), m_compiler.get());
     m_spatialPathReusePass = std::make_unique<PathReuse>(m_app->getContext().get(), m_alloc.get(), m_compiler.get(), EResampleType::Spatial);
-    // m_temporalPathReusePass = std::make_unique<PathReuse>(m_app->getContext().get(), m_alloc.get(), m_compiler.get(), EResampleType::Spatial);
+    m_temporalPathReusePass = std::make_unique<PathReuse>(m_app->getContext().get(), m_alloc.get(), m_compiler.get(), EResampleType::Temporal);
 
     // prepare structured buffers
     m_diResContainer = std::make_unique<DIReservoirContainer>(m_dutil.get(), m_alloc.get());
     m_initReservoirContainer = std::make_unique<ReservoirContainer>(m_dutil.get(), m_alloc.get());
     m_spatialReservoirContainer = std::make_unique<ReservoirContainer>(m_dutil.get(), m_alloc.get());
+    m_temporalReservoirContainer = std::make_unique<ReservoirContainer>(m_dutil.get(), m_alloc.get());
     m_gbufferContainer = std::make_unique<GBufferContainer>(m_dutil.get(), m_alloc.get());
 
     // Requesting ray tracing properties
@@ -159,6 +160,8 @@ public:
     m_gbufferPass->createComputePIpeline();
     m_spatialPathReusePass->createPipelineLayout();
     m_spatialPathReusePass->createComputePipeline();
+    m_temporalPathReusePass->createPipelineLayout();
+    m_temporalPathReusePass->createComputePipeline();
   }
 
   void onDetach() override
@@ -176,22 +179,36 @@ public:
     VkDescriptorBufferInfo dbi_unif{m_bFrameInfo.buffer, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo sceneDesc{m_bSceneDesc.buffer, 0, VK_WHOLE_SIZE};
 
-    m_gbufferPass->updateComputeDescriptorSets(m_rtBuilder.getAccelerationStructure(),
-                                               m_gbufferContainer->getGBuffer(),
-                                               dbi_unif,
-                                               sceneDesc);
-    m_spatialPathReusePass->updateComputeDescriptorSets(m_initReservoirContainer->getReservoir(),
-                                                        m_spatialReservoirContainer->getReservoir(),
-                                                        m_gbufferContainer->getGBuffer(),
-                                                        m_gBuffers->getDescriptorImageInfo(eImgIntermediate1),
-                                                        dbi_unif,
-                                                        sceneDesc);
-    m_resVisualizer->updateComputeDescriptorSets(m_diResContainer->getReservoir(),
-                                                 m_spatialReservoirContainer->getReservoir(),
-                                                 m_gBuffers->getDescriptorImageInfo(eImgIntermediate1),
-                                                 m_gBuffers->getDescriptorImageInfo(eImgRendered));
-    m_tonemapper->updateComputeDescriptorSets(m_gBuffers->getDescriptorImageInfo(eImgRendered),
-                                              m_gBuffers->getDescriptorImageInfo(eImgTonemapped));
+    m_gbufferPass->updateComputeDescriptorSets(
+        m_rtBuilder.getAccelerationStructure(),
+        m_gbufferContainer->getGBuffer(),
+        dbi_unif,
+        sceneDesc);
+    m_temporalPathReusePass->updateComputeDescriptorSets(
+        m_initReservoirContainer->getReservoir(),
+        m_temporalReservoirContainer->getReservoir(),
+        m_spatialReservoirContainer->getReservoir(),
+        m_gbufferContainer->getGBuffer(),
+        m_gBuffers->getDescriptorImageInfo(eImgIntermediate1),
+        dbi_unif,
+        sceneDesc);
+    m_spatialPathReusePass->updateComputeDescriptorSets(
+        m_spatialReservoirContainer->getReservoir(),
+        m_initReservoirContainer->getReservoir(),
+        m_gbufferContainer->getGBuffer(),
+        m_gBuffers->getDescriptorImageInfo(eImgIntermediate1),
+        dbi_unif,
+        sceneDesc);
+
+    m_resVisualizer->updateComputeDescriptorSets(
+        m_diResContainer->getReservoir(),
+        m_initReservoirContainer->getReservoir(),
+        m_gBuffers->getDescriptorImageInfo(eImgIntermediate1),
+        m_gBuffers->getDescriptorImageInfo(eImgRendered));
+
+    m_tonemapper->updateComputeDescriptorSets(
+        m_gBuffers->getDescriptorImageInfo(eImgRendered),
+        m_gBuffers->getDescriptorImageInfo(eImgTonemapped));
   }
 
   void onResize(uint32_t width, uint32_t height) override
@@ -205,6 +222,7 @@ public:
     {
       cmd = m_diResContainer->createReservoir(cmd, size);
       cmd = m_initReservoirContainer->createReservoir(cmd, size);
+      cmd = m_temporalReservoirContainer->createReservoir(cmd, size);
       cmd = m_spatialReservoirContainer->createReservoir(cmd, size);
       cmd = m_gbufferContainer->createGBuffer(cmd, size);
     }
@@ -430,6 +448,7 @@ public:
 
       reloadPipeline();
       m_gbufferPass->createComputePIpeline();
+      m_temporalPathReusePass->createComputePipeline();
       m_spatialPathReusePass->createComputePipeline();
       m_resVisualizer->createComputePipeline();
     }
@@ -548,6 +567,48 @@ public:
       vkCmdPipelineBarrier2KHR(cmd, &dep_info);
     }
 
+    m_temporalPathReusePass->runCompute(cmd, size);
+    {
+      std::vector<VkBufferMemoryBarrier2KHR> barriers;
+
+      VkBufferMemoryBarrier2KHR buffer_barrier{};
+      buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+      buffer_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+      buffer_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+      buffer_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      buffer_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      buffer_barrier.buffer = m_spatialReservoirContainer->getReservoir().buffer;
+      buffer_barrier.size = m_spatialReservoirContainer->getBufferSize();
+
+      // VkBufferMemoryBarrier2KHR reservoir_barrier{};
+      // reservoir_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2_KHR;
+      // reservoir_barrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT_KHR;
+      // reservoir_barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT_KHR;
+      // reservoir_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      // reservoir_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
+      // reservoir_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      // reservoir_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      // reservoir_barrier.buffer = m_initReservoirContainer->getReservoir().buffer;
+      // reservoir_barrier.size = m_initReservoirContainer->getBufferSize();
+
+      barriers.emplace_back(buffer_barrier);
+      // barriers.emplace_back(reservoir_barrier);
+
+      VkDependencyInfoKHR dep_info{};
+      dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+      dep_info.bufferMemoryBarrierCount = 1;
+      dep_info.pBufferMemoryBarriers = &buffer_barrier;
+      vkCmdPipelineBarrier2KHR(cmd, &dep_info);
+
+      auto image_memory_barrier =
+          nvvk::makeImageMemoryBarrier(m_gBuffers->getColorImage(eImgIntermediate1), VK_ACCESS_SHADER_READ_BIT,
+                                       VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+      vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+                           nullptr, 0, nullptr, 1, &image_memory_barrier);
+    }
+
     m_spatialPathReusePass->runCompute(cmd, size);
 
     {
@@ -559,8 +620,8 @@ public:
       reservoir_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT_KHR;
       reservoir_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       reservoir_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      reservoir_barrier.buffer = m_spatialReservoirContainer->getReservoir().buffer;
-      reservoir_barrier.size = m_spatialReservoirContainer->getBufferSize();
+      reservoir_barrier.buffer = m_initReservoirContainer->getReservoir().buffer;
+      reservoir_barrier.size = m_initReservoirContainer->getBufferSize();
 
       VkDependencyInfoKHR dep_info{};
       dep_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
@@ -1153,6 +1214,7 @@ private:
     {
       m_subframe = 0;
     }
+    m_temporalReservoirContainer.swap(m_spatialReservoirContainer);
     return true;
   }
 
@@ -1232,6 +1294,7 @@ private:
   std::unique_ptr<GBufferContainer> m_gbufferContainer;
   std::unique_ptr<DIReservoirContainer> m_diResContainer;
   std::unique_ptr<ReservoirContainer> m_initReservoirContainer;
+  std::unique_ptr<ReservoirContainer> m_temporalReservoirContainer;
   std::unique_ptr<ReservoirContainer> m_spatialReservoirContainer;
 
   // Pipeline
