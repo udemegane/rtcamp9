@@ -627,7 +627,7 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     }
     packedReservoir[pixel1d] = pack(res);
 
-    pixel_color /= pushConst.maxSamples;
+    // pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result
     if (true)

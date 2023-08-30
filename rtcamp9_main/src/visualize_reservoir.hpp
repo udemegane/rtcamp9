@@ -32,7 +32,7 @@ public:
     void createPipelineLayout();
     void createComputePipeline();
     void updateComputeDescriptorSets(VkDescriptorBufferInfo inReservoir, VkDescriptorBufferInfo inGiReservoir, VkDescriptorImageInfo inThpImage, VkDescriptorImageInfo outImage);
-
+    void updatePushConstant(PushConstant constant);
     void runCompute(VkCommandBuffer cmd, const VkExtent2D &size);
 
     bool onUI();
@@ -45,7 +45,7 @@ private:
     std::unique_ptr<nvvk::DescriptorSetContainer> m_dset;
     VkPipeline m_pipeline{VK_NULL_HANDLE};
 
-    DBGConstant m_pushConst;
+    PushConstant m_pushConst;
     std::unique_ptr<VkDescriptorBufferInfo> m_ibuffer;
     std::unique_ptr<VkDescriptorImageInfo> m_thpimage;
     std::unique_ptr<VkDescriptorBufferInfo> m_giReservoir;

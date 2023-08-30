@@ -464,6 +464,7 @@ public:
                          0, nullptr, 0, nullptr);
 
     updatePassDescriptors();
+    m_resVisualizer->updatePushConstant(m_pushConst);
 
     // Raytraced GBuffer
     m_gbufferPass->runCompute(cmd, size);

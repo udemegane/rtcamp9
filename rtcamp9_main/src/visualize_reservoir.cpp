@@ -5,7 +5,6 @@
 VisualizeReservoir::VisualizeReservoir(nvvk::Context *ctx, nvvkhl::AllocVma *alloc, HLSLShaderCompiler *compiler)
     : m_ctx(ctx), m_dutil(std::make_unique<nvvk::DebugUtil>(ctx->m_device)), m_dset(std::make_unique<nvvk::DescriptorSetContainer>(ctx->m_device)), m_compiler(compiler)
 {
-  m_pushConst.dummy = 0;
 }
 
 VisualizeReservoir::~VisualizeReservoir()
@@ -24,7 +23,7 @@ void VisualizeReservoir::createPipelineLayout()
   m_dset->initLayout(VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
   m_dutil->DBG_NAME(m_dset->getLayout());
 
-  VkPushConstantRange push_constant = {VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DBGConstant)};
+  VkPushConstantRange push_constant = {VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstant)};
   m_dset->initPipeLayout(1, &push_constant);
   m_dutil->DBG_NAME(m_dset->getPipeLayout());
 }
@@ -61,6 +60,11 @@ void VisualizeReservoir::updateComputeDescriptorSets(VkDescriptorBufferInfo inRe
   m_writes.emplace_back(m_dset->makeWrite(0, B_compose_giInput, m_giReservoir.get()));
   m_writes.emplace_back(m_dset->makeWrite(0, B_compose_thpInput, m_thpimage.get()));
   m_writes.emplace_back(m_dset->makeWrite(0, eDebugPassOutput, m_oimage.get()));
+}
+
+void VisualizeReservoir::updatePushConstant(PushConstant constant)
+{
+  m_pushConst = constant;
 }
 
 void VisualizeReservoir::runCompute(VkCommandBuffer cmd, const VkExtent2D &size)

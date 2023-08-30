@@ -5,8 +5,8 @@
 #include "dh_reservoir.hlsl"
 #include "reservoir.hlsl"
 
-// [[vk::push_constant]]
-// ConstantBuffer<PushConstant> pushConst;
+[[vk::push_constant]]
+ConstantBuffer<PushConstant> pushConst;
 [[vk::binding(eDebugPassInput)]]
 RWStructuredBuffer<DIReservoir> gRes;
 [[vk::binding(B_compose_giInput)]]
@@ -40,7 +40,7 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     if (true)
     {
         outColor = gRes[pixel1D].radiance;
-        // outColor /= pushConst.maxSamples;
+        outColor /= pushConst.maxSamples;
         // outColor = centerRes.s.p_hat_xi;
     }
     else
