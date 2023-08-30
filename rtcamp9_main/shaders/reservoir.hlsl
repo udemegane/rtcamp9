@@ -173,7 +173,13 @@ void capReservoir(inout Reservoir r)
 float calcContributionWegiht(Reservoir r)
 {
     float p_hat = length(r.s.p_hat_xi);
-    return p_hat == 0.0f ? 0.0f : (r.wSum / (r.M * (p_hat + FLT_EPSILON)));
+    return p_hat == 0.0f ? 0.0f : (r.wSum / ((p_hat + FLT_EPSILON)));
+}
+
+float calcContributionWegihtGRIS(Reservoir r)
+{
+    float p_hat = length(r.s.p_hat_xi);
+    return p_hat == 0.0f ? 0.0f : (r.wSum / ((p_hat + FLT_EPSILON)));
 }
 
 // bool updateReservoir(inout DIReservoir r, in Sample)

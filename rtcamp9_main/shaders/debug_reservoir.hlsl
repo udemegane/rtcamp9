@@ -34,7 +34,7 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     // gOutImage[pixel] = float4(thpInImage[pixel].xyz * centerRes.s.p_hat_cached * calcContributionWegiht(centerRes), 1.0f);
 
     bool reuseOk = centerRes.s.k == 1;
-    if (!reuseOk)
+    if (false)
     {
         outColor = gRes[pixel1D].radiance;
         // outColor /= pushConst.maxSamples;
@@ -42,8 +42,9 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     }
     else
     {
-        float3 reconstructRad = thpInImage[pixel].xyz * centerRes.s.p_hat_cached * calcContributionWegiht(centerRes);
-        // float3 reconstructRad = centerRes.s.p_hat_xi * calcContributionWegiht(centerRes);
+        // float3 reconstructRad = thpInImage[pixel].xyz * centerRes.s.p_hat_cached * calcContributionWegiht(centerRes);
+        float3 reconstructRad = centerRes.s.p_hat_xi * calcContributionWegiht(centerRes);
+        reconstructRad /= 2;
         outColor = reconstructRad;
     }
 
@@ -61,11 +62,19 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     else
     {
         int subframe = pushConst.frame % SUB_FRAMES;
-        float a = 1.0f / float(subframe + 1);
+        if (subframe == 1)
+        {
+            gOutImage[pixel] = float4(outColor, 1.0f);
+        }
+        else
+        {
+            float a = 1.0f / float(subframe + 1);
 
-        float3 old_color = gOutImage[pixel].xyz;
-        outColor = lerp(old_color, outColor, a);
-        gOutImage[pixel] = float4(outColor, 1.0f);
+            float3 old_color = gOutImage[pixel].xyz;
+            outColor = lerp(old_color, outColor, a);
+            gOutImage[pixel] = float4(outColor, 1.0f);
+        }
+
         // gOutImage[pixel] = float4(a, a, a, 1.0f);
     }
 }

@@ -41,7 +41,7 @@ using uint = uint32_t;
 #endif
 #endif // __cplusplus
 #define GROUP_SIZE 16
-#define SUB_FRAMES 100
+#define SUB_FRAMES 300
 struct Light
 {
   vec3 position;

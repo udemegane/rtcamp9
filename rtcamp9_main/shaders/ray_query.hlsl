@@ -366,7 +366,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
             evalData.k2 = L;
             bsdfEvaluate(evalData, pbrMat);
             //  +
-            const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 100.0) / (distanceToLight * distanceToLight);
+            const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 0.7f) * 150.0) / (distanceToLight * distanceToLight);
             contrib += w * evalData.bsdf_diffuse;
             contrib += w * evalData.bsdf_glossy;
             Lo = contrib;
@@ -424,14 +424,15 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
                 radiance += contrib;
             }
         }
-        res.M = M;
+        // res.M = M;
     }
-    res.M++;
+    // res.M++;
+
     // float3 thp2 = isSampleReady ? sampleThp * thp_v0_to_vc : throughput;
     // return float3(isSampleReady, isSampleReady, isSampleReady);
 
     // return throughput - thp2;
-    return radiance;
+    // return radiance;
     // return res.s.radiance;
     // return throughput - thp_v0_to_vc;
 
@@ -508,7 +509,7 @@ float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout ui
         evalData.k2 = L;
         bsdfEvaluate(evalData, pbrMat);
 
-        const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 500.0) / (distanceToLight * distanceToLight);
+        const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 0.5f, 0.5f) * 500.0) / (distanceToLight * distanceToLight);
         contrib += w * evalData.bsdf_diffuse;
         contrib += w * evalData.bsdf_glossy;
         in_F = contrib;
@@ -628,7 +629,7 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     }
     packedReservoir[pixel1d] = pack(res);
 
-    // pixel_color /= pushConst.maxSamples;
+    pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result
     if (true)

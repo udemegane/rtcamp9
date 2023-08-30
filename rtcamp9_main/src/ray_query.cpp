@@ -140,7 +140,7 @@ public:
     m_sbt.setup(m_device, gctQueueIndex, m_alloc.get(), m_rtProperties);
 
     m_frameinfo = FrameInfo{};
-    m_xpos = 0.0f;
+    m_xpos = -10.0f;
 
     // Create resources
     createScene();
@@ -184,6 +184,7 @@ public:
         m_gbufferContainer->getGBuffer(),
         dbi_unif,
         sceneDesc);
+
     m_temporalPathReusePass->updateComputeDescriptorSets(
         m_initReservoirContainer->getReservoir(),
         m_temporalReservoirContainer->getReservoir(),
@@ -192,6 +193,7 @@ public:
         m_gBuffers->getDescriptorImageInfo(eImgIntermediate1),
         dbi_unif,
         sceneDesc);
+
     m_spatialPathReusePass->updateComputeDescriptorSets(
         m_spatialReservoirContainer->getReservoir(),
         m_initReservoirContainer->getReservoir(),
@@ -337,7 +339,7 @@ public:
 
       // Display the G-Buffer image
       ImGui::Image(m_gBuffers->getDescriptorSet(eImgTonemapped),
-                   m_auto_render ? ImVec2{1920, 1080} : ImGui::GetContentRegionAvail());
+                   ImGui::GetContentRegionAvail());
 
       ImGui::End();
       ImGui::PopStyleVar();
@@ -368,6 +370,11 @@ public:
                                   0.0F};
         VkAccelerationStructureInstanceKHR &tinstSp = m_tlas[1];
         tinstSp.transform = nvvk::toTransformMatrixKHR(m_nodes[1].localMatrix());
+
+        CameraManip.setLookat({-15.0F + m_xpos, 4.33F, 0.0f}, {0.0F + m_xpos, 4.33F, 0.0F}, {0.0F, 1.0F, 0.0F});
+        m_light.position = {-2.7f + m_xpos,
+                            0.4f,
+                            0.0F};
       }
 
       // tinst.transform = nvvk::toTransformMatrixKHR(m_nodes[idx].localMatrix());
@@ -378,21 +385,21 @@ public:
         const int i3 = 8;
 
         m_nodes[i1].rotation = nvmath::slerp_quats(
-            currentFrame * (m_speed / 100.0f),
+            currentFrame * (m_speed / 70.0f),
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
         tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
 
         m_nodes[i2].rotation = nvmath::slerp_quats(
-            currentFrame * (m_speed / 100.0f),
+            currentFrame * (m_speed / 70.0f),
             nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
         VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
         tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
 
         m_nodes[i3].rotation = nvmath::slerp_quats(
-            currentFrame * (m_speed / 100.0f),
+            currentFrame * (m_speed / 70.0f),
             nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
         VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
@@ -403,7 +410,7 @@ public:
         const int i1 = 12;
         const int i2 = 13;
         const int i3 = 14;
-        const float offset = -1.0f;
+        const float offset = -0.4f;
         m_nodes[i1].rotation = nvmath::slerp_quats(
             currentFrame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
@@ -478,6 +485,15 @@ public:
       m_frameinfo.height = size.height;
       m_frameinfo.frame = m_frame;
     }
+
+    // {
+
+    //   m_tonemapper->m_settings.exposure = 1.7f;
+    //   m_tonemapper->m_settings.brightness = 0.85f;
+    //   m_tonemapper->m_settings.contrast = 1.0f;
+    //   m_tonemapper->m_settings.saturation = 0.488f;
+    //   m_tonemapper->m_settings.vignette = 0.366f;
+    // }
     // m_frameinfo{
     //     .proj =
     //         .view = CameraManip.getMatrix(),
@@ -568,6 +584,7 @@ public:
     }
 
     m_temporalPathReusePass->runCompute(cmd, size);
+
     {
       std::vector<VkBufferMemoryBarrier2KHR> barriers;
 
@@ -667,7 +684,7 @@ public:
       }
       callSaveImageJob(formattedNum + ".jpg");
       m_anim_count++;
-      if (m_auto_render && m_anim_count > 150)
+      if (m_auto_render && m_anim_count > 120)
       {
         while (!m_saveImageJobs.empty())
         {
@@ -741,11 +758,11 @@ private:
     m_materials.push_back({{0.985f, 0.862f, 0.405f}, 0.5f, 0.0f});
     m_materials.push_back({{0.622f, 0.928f, 0.728f}, 0.05f, 1.0f});
     m_materials.push_back({{.7F, .7F, .7F}, 0.3f, 0.0f});
-    m_materials.push_back({{0.125, 0.0, 0.301}, 0.4f, 1.0f}); // Black violet
+    m_materials.push_back({{0.125, 0.0, 0.301}, 0.7f, 1.0f}); // Black violet
     m_materials.push_back({{1.0, 1.0, 1.0}, 1.0f, 0.0f});     // White
-    m_materials.push_back({{0.0, 0.0, 0.1}, 0.4f, 0.0f});     // mat black
-    m_materials.push_back({{1.0, 1.0, 1.0}, 0.0f, 0.0f});     // White with reflection 6
-    m_materials.push_back({{1.0, 1.0, 1.0}, 0.0f, 1.0f});     // Mirror
+    m_materials.push_back({{0.0, 0.0, 0.1}, 0.6f, 0.0f});     // mat black
+    m_materials.push_back({{1.0, 1.0, 1.0}, 0.05f, 0.0f});    // White with reflection 6
+    m_materials.push_back({{1.0, 1.0, 1.0}, 0.05f, 1.0f});    // Mirror
 
     m_meshes.emplace_back(nvh::createCube(2.8, 0.2, 6));
     m_meshes.emplace_back(nvh::createSphereUv(0.18f));
@@ -776,7 +793,7 @@ private:
       auto &n = m_nodes.emplace_back();
       n.mesh = 0;
       n.material = 0;
-      n.translation = {-3.0f, 0.7f, 0.0F};
+      n.translation = {-3.0f, 1.1f, 0.0F};
       n.rotation = nvmath::quatf(0.0f, 0.0f, 0.259f, 0.966f);
     }
 
@@ -923,14 +940,14 @@ private:
     // }
 
     m_light.intensity = 500.0f;
-    m_light.position = {-2.7f, 0.4f, 0.0f};
-    m_light.radius = 0.1f;
+    m_light.position = {-2.8f, 1.0f, 0.0f};
+    m_light.radius = 0.2f;
 
     // Setting camera to see the scene
     CameraManip.setClipPlanes({0.1F, 100.0F});
     CameraManip.setLookat({-15.0F, 4.33F, 0.0f}, {0.0F, 4.33F, 0.0F}, {0.0F, 1.0F, 0.0F});
     // Default parameters for overall material
-    m_pushConst.maxDepth = 5;
+    m_pushConst.maxDepth = 20;
     m_pushConst.frame = 0;
     m_pushConst.fireflyClampThreshold = 10;
     // m_pushConst.maxSamples = m_auto_render ? 30 : 30;
@@ -1213,6 +1230,7 @@ private:
     if (m_subframe > m_pushConst.maxSubframes)
     {
       m_subframe = 0;
+      m_xpos += 0.15f;
     }
     m_temporalReservoirContainer.swap(m_spatialReservoirContainer);
     return true;
@@ -1305,19 +1323,18 @@ private:
   int m_subframe{0};
   int m_maxFrames{1000000};
 
-  float m_xpos = 0.0f;
+  float m_xpos = -10.0f;
 
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
   nvvk::SBTWrapper m_sbt; // Shading binding table wrapper
   nvvk::RaytracingBuilderKHR m_rtBuilder;
   nvvkhl::PipelineContainer m_rtPipe;
-
   bool m_shaderCompile = false;
   bool m_shouldSaveImage = false;
   bool m_fullscreen = false;
   bool m_auto_render = false;
   uint m_anim_count = 0;
-  float m_speed = 1.0f;
+  float m_speed = 2.0f;
   std::queue<std::thread> m_saveImageJobs;
 };
 

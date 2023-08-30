@@ -65,10 +65,10 @@ float3 resamplePixel(float3 rayDir, inout uint seed, uint2 pixel, float2 launchS
         }
         v1Thp = sampleData.bsdf_over_pdf;
     }
-    if (centerRes.s.k == 1 && false)
+    if (centerRes.s.k == 1)
     {
         uint seed2 = seed;
-        for (int i = 1; i < 18; i++)
+        for (int i = 1; i < 36; i++)
         {
             float radius = 12 * rand(seed2);
             float angle = M_2PI * rand(seed2);
@@ -96,7 +96,7 @@ float3 resamplePixel(float3 rayDir, inout uint seed, uint2 pixel, float2 launchS
         }
     }
 
-    packedOutReservoir[pixel1d] = pack(centerRes);
+    // packedOutReservoir[pixel1d] = pack(centerRes);
     return v1Thp;
 }
 
@@ -123,5 +123,6 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     float3 rayDir = mul(frameInfo.viewInv, float4(normalize(target.xyz), 0.0)).xyz;
 
     float3 thp = resamplePixel(rayDir, seed, pixel, imgSize, pixel1d);
+    packedOutReservoir[pixel1d] = packedInReservoir[pixel1d];
     thpOutImage[pixel] = float4(thp, 1.0f);
 }
