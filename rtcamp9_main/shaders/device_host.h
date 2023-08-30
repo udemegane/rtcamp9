@@ -41,7 +41,7 @@ using uint = uint32_t;
 #endif
 #endif // __cplusplus
 #define GROUP_SIZE 16
-
+#define SUB_FRAMES 100
 struct Light
 {
   vec3 position;
@@ -57,6 +57,10 @@ struct PushConstant
   float fireflyClampThreshold;
   int maxSamples;
   Light light;
+  int subFrame;
+  int maxSubframes;
+  int _1;
+  int _2;
 };
 
 struct FrameInfo

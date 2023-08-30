@@ -259,8 +259,8 @@ public:
         if (changed)
         {
           CameraManip.setLookat({-15.0F + m_xpos, 4.33F, 0.0f}, {0.0F + m_xpos, 4.33F, 0.0F}, {0.0F, 1.0F, 0.0F});
-          m_light.position = {-8.0F + m_xpos,
-                              4.33F,
+          m_light.position = {-2.7f + m_xpos,
+                              0.4f,
                               0.0F};
         }
         if (ImGui::Button("Save Image"))
@@ -333,9 +333,25 @@ public:
     // anim
     {
       const int idx = 1;
+      int currentFrame = m_frame / SUB_FRAMES;
       m_nodes[idx].translation = vec3f(1.0f, 1.0f + sin(m_frame * (1.0f / 100.0f)), 1.0f);
 
       VkAccelerationStructureInstanceKHR &tinst = m_tlas[idx];
+
+      { // Door
+        m_nodes[0].translation = {-3.0f + m_xpos,
+                                  0.7f,
+                                  0.0F};
+        VkAccelerationStructureInstanceKHR &tinst = m_tlas[0];
+        tinst.transform = nvvk::toTransformMatrixKHR(m_nodes[0].localMatrix());
+
+        m_nodes[1].translation = {-2.0f + m_xpos,
+                                  1.55f,
+                                  0.0F};
+        VkAccelerationStructureInstanceKHR &tinstSp = m_tlas[1];
+        tinstSp.transform = nvvk::toTransformMatrixKHR(m_nodes[1].localMatrix());
+      }
+
       // tinst.transform = nvvk::toTransformMatrixKHR(m_nodes[idx].localMatrix());
       float speed = 10.0f;
       { // Gate 1
@@ -344,21 +360,21 @@ public:
         const int i3 = 8;
 
         m_nodes[i1].rotation = nvmath::slerp_quats(
-            m_frame * (m_speed / 100.0f),
+            currentFrame * (m_speed / 100.0f),
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
         tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
 
         m_nodes[i2].rotation = nvmath::slerp_quats(
-            m_frame * (m_speed / 100.0f),
+            currentFrame * (m_speed / 100.0f),
             nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
         VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
         tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
 
         m_nodes[i3].rotation = nvmath::slerp_quats(
-            m_frame * (m_speed / 100.0f),
+            currentFrame * (m_speed / 100.0f),
             nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
         VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
@@ -371,21 +387,21 @@ public:
         const int i3 = 14;
         const float offset = -1.0f;
         m_nodes[i1].rotation = nvmath::slerp_quats(
-            m_frame * (m_speed / 100.0f) + offset,
+            currentFrame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
         tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
 
         m_nodes[i2].rotation = nvmath::slerp_quats(
-            m_frame * (m_speed / 100.0f) + offset,
+            currentFrame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
         VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
         tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
 
         m_nodes[i3].rotation = nvmath::slerp_quats(
-            m_frame * (m_speed / 100.0f) + offset,
+            currentFrame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
         VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
@@ -395,7 +411,7 @@ public:
         const int m1 = 15;
         const float offset = -2.0f;
         m_nodes[m1].rotation = nvmath::slerp_quats(
-            m_frame * (m_speed / 100.0f) + offset,
+            currentFrame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, -0.707f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[m1];
@@ -451,7 +467,7 @@ public:
     //     .camPos = eye,
     // };
     vkCmdUpdateBuffer(cmd, m_bFrameInfo.buffer, 0, sizeof(FrameInfo), &m_frameinfo);
-
+    m_pushConst.subFrame = m_subframe;
     m_pushConst.frame = m_frame;
     m_pushConst.light = m_light;
 
@@ -570,7 +586,8 @@ public:
 
     m_tonemapper->runCompute(cmd, size);
 
-    if (m_shouldSaveImage || m_auto_render)
+    // int imageNum = ;
+    if (m_shouldSaveImage || (m_auto_render && (m_frame % SUB_FRAMES == SUB_FRAMES - 1)))
     {
       auto image_memory_barrier =
           nvvk::makeImageMemoryBarrier(m_gBuffers->getColorImage(eImgTonemapped), VK_ACCESS_SHADER_READ_BIT,
@@ -582,8 +599,14 @@ public:
         m_saveImageJobs.front().join();
         m_saveImageJobs.pop();
       }
-      callSaveImageJob("out_" + std::to_string(m_frame) + ".jpg");
-      if (m_auto_render && m_frame > 120)
+      std::string formattedNum = std::to_string(m_anim_count);
+      while (formattedNum.length() < 3)
+      {
+        formattedNum = "0" + formattedNum;
+      }
+      callSaveImageJob(formattedNum + ".jpg");
+      m_anim_count++;
+      if (m_auto_render && m_anim_count > 150)
       {
         while (!m_saveImageJobs.empty())
         {
@@ -613,7 +636,7 @@ private:
   void saveImage(nvvk::Buffer pixel_buffer, const std::string &outFilename)
   {
     std::filesystem::path path = std::filesystem::current_path();
-    auto filePath = path.string() + "/out_images/" + outFilename;
+    auto filePath = path.parent_path().string() + "/" + outFilename;
     // Write the buffer to disk
     LOGI(" - Size: %d, %d\n", m_gBuffers->getSize().width, m_gBuffers->getSize().height);
     LOGI(" - Bytes: %d\n", m_gBuffers->getSize().width * m_gBuffers->getSize().height * 4);
@@ -663,8 +686,8 @@ private:
     m_materials.push_back({{1.0, 1.0, 1.0}, 0.0f, 0.0f});     // White with reflection 6
     m_materials.push_back({{1.0, 1.0, 1.0}, 0.0f, 1.0f});     // Mirror
 
-    m_meshes.emplace_back(nvh::createCube(1, 1, 1));
-    m_meshes.emplace_back(nvh::createSphereUv(0.5f));
+    m_meshes.emplace_back(nvh::createCube(2.8, 0.2, 6));
+    m_meshes.emplace_back(nvh::createSphereUv(0.18f));
     m_meshes.emplace_back(nvh::createPlane(10, 100, 100));
     m_meshes.emplace_back(nvh::createCube(20, 0.5f, 20));
 
@@ -692,7 +715,8 @@ private:
       auto &n = m_nodes.emplace_back();
       n.mesh = 0;
       n.material = 0;
-      n.translation = {0.0f, 0.5f, 0.0F};
+      n.translation = {-3.0f, 0.7f, 0.0F};
+      n.rotation = nvmath::quatf(0.0f, 0.0f, 0.259f, 0.966f);
     }
 
     // Instance Sphere
@@ -700,7 +724,7 @@ private:
       auto &n = m_nodes.emplace_back();
       n.mesh = 1;
       n.material = 1;
-      n.translation = {1.0f, 1.5f, 1.0F};
+      n.translation = {-2.0f, 1.6f, 0.0F};
     }
 
     // Adding a plane & material
@@ -781,7 +805,7 @@ private:
       auto &n = m_nodes.emplace_back();
       n.mesh = 11;
       n.material = 4;
-      n.translation = {10.0f, 0.0f, 0.0f};
+      n.translation = {10.0f, -0.5f, 0.0f};
       // n.rotation = nvmath::quatf(-0.259f, 0.0f, 0.0f, 0.966f);
     }
 
@@ -838,8 +862,8 @@ private:
     // }
 
     m_light.intensity = 500.0f;
-    m_light.position = {-1.5f, 4.33f, 0.0f};
-    m_light.radius = 0.3f;
+    m_light.position = {-2.7f, 0.4f, 0.0f};
+    m_light.radius = 0.1f;
 
     // Setting camera to see the scene
     CameraManip.setClipPlanes({0.1F, 100.0F});
@@ -850,6 +874,8 @@ private:
     m_pushConst.fireflyClampThreshold = 10;
     // m_pushConst.maxSamples = m_auto_render ? 30 : 30;
     m_pushConst.light = m_light;
+    m_pushConst.maxSubframes = 100;
+    m_pushConst.subFrame = 0;
   }
 
   void createGbuffers(const nvmath::vec2f &size)
@@ -1122,6 +1148,11 @@ private:
       return false;
     }
     m_frame++;
+    m_subframe++;
+    if (m_subframe > m_pushConst.maxSubframes)
+    {
+      m_subframe = 0;
+    }
     return true;
   }
 
@@ -1208,6 +1239,7 @@ private:
   VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE; // The description of the pipeline
   VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;     // The graphic pipeline to render
   int m_frame{0};
+  int m_subframe{0};
   int m_maxFrames{1000000};
 
   float m_xpos = 0.0f;
@@ -1236,7 +1268,7 @@ auto main(int argc, char **argv) -> int
   nvprintSetLogFileName(logfile.c_str());
   nvh::CommandLineParser parser("RTCamp9 Render");
   bool auto_render = false;
-  uint spp = 50;
+  uint spp = 1;
   parser.addArgument({"-a", "--auto"}, &auto_render, "本番");
   parser.addArgument({"-s", "--spp"}, &spp, "サンプル数");
   if (!parser.parse(argc, argv))

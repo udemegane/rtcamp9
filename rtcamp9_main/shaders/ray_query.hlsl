@@ -589,6 +589,7 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize, inout Re
     float3 gi_radiance = pathTrace(ray, seed, initSeed, thp, pixel1d, res);
     float3 radiance = gi_radiance;
 
+    // outImage[launchID] = float4(di_radiance, 1.0f);
     // Removing fireflies
     float lum = dot(radiance, float3(0.212671F, 0.715160F, 0.072169F));
     if (lum > pushConst.fireflyClampThreshold)
