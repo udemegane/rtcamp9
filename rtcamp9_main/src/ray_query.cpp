@@ -251,7 +251,7 @@ public:
         }
       }
 
-      if (ImGui::CollapsingHeader("Camera Route", ImGuiTreeNodeFlags_DefaultOpen))
+      if (ImGui::CollapsingHeader("RTCamp9", ImGuiTreeNodeFlags_DefaultOpen))
       {
         PropertyEditor::begin();
         bool changed = PropertyEditor::entry("X Pos", [&]
@@ -267,6 +267,9 @@ public:
         {
           m_shouldSaveImage = true;
         }
+        changed = PropertyEditor::entry("speed", [&]
+                                        { return ImGui::SliderFloat("#1", &m_speed, 0.0F, 10.0F); });
+
         PropertyEditor::end();
       }
 
@@ -315,7 +318,8 @@ public:
       ImGui::Begin("Viewport");
 
       // Display the G-Buffer image
-      ImGui::Image(m_gBuffers->getDescriptorSet(eImgTonemapped), ImGui::GetContentRegionAvail());
+      ImGui::Image(m_gBuffers->getDescriptorSet(eImgTonemapped),
+                   m_auto_render ? ImVec2{1920, 1080} : ImGui::GetContentRegionAvail());
 
       ImGui::End();
       ImGui::PopStyleVar();
@@ -340,21 +344,21 @@ public:
         const int i3 = 8;
 
         m_nodes[i1].rotation = nvmath::slerp_quats(
-            m_frame * (speed / 100.0f),
+            m_frame * (m_speed / 100.0f),
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
         tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
 
         m_nodes[i2].rotation = nvmath::slerp_quats(
-            m_frame * (speed / 100.0f),
+            m_frame * (m_speed / 100.0f),
             nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
         VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
         tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
 
         m_nodes[i3].rotation = nvmath::slerp_quats(
-            m_frame * (speed / 100.0f),
+            m_frame * (m_speed / 100.0f),
             nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
         VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
@@ -367,21 +371,21 @@ public:
         const int i3 = 14;
         const float offset = -1.0f;
         m_nodes[i1].rotation = nvmath::slerp_quats(
-            m_frame * (speed / 100.0f) + offset,
+            m_frame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, 0.966f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[i1];
         tinst1.transform = nvvk::toTransformMatrixKHR(m_nodes[i1].localMatrix());
 
         m_nodes[i2].rotation = nvmath::slerp_quats(
-            m_frame * (speed / 100.0f) + offset,
+            m_frame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, 0.707f));
         VkAccelerationStructureInstanceKHR &tinst2 = m_tlas[i2];
         tinst2.transform = nvvk::toTransformMatrixKHR(m_nodes[i2].localMatrix());
 
         m_nodes[i3].rotation = nvmath::slerp_quats(
-            m_frame * (speed / 100.0f) + offset,
+            m_frame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.500f, 0.0f, 0.0f, -0.866f),
             nvmath::quatf(0.259f, 0.0f, 0.0f, -0.966f));
         VkAccelerationStructureInstanceKHR &tinst3 = m_tlas[i3];
@@ -391,7 +395,7 @@ public:
         const int m1 = 15;
         const float offset = -2.0f;
         m_nodes[m1].rotation = nvmath::slerp_quats(
-            m_frame * (speed / 100.0f) + offset,
+            m_frame * (m_speed / 100.0f) + offset,
             nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f),
             nvmath::quatf(0.707f, 0.0f, 0.0f, -0.707f));
         VkAccelerationStructureInstanceKHR &tinst1 = m_tlas[m1];
@@ -1203,7 +1207,7 @@ private:
   VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE; // The description of the pipeline
   VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;     // The graphic pipeline to render
   int m_frame{0};
-  int m_maxFrames{10000};
+  int m_maxFrames{1000000};
 
   float m_xpos = 0.0f;
 
@@ -1217,6 +1221,7 @@ private:
   bool m_fullscreen = false;
   bool m_auto_render = false;
   uint m_anim_count = 0;
+  float m_speed = 1.0f;
   std::queue<std::thread> m_saveImageJobs;
 };
 
@@ -1240,7 +1245,7 @@ auto main(int argc, char **argv) -> int
   }
 
   nvvkhl::ApplicationCreateInfo spec;
-  spec.name = PROJECT_NAME " Example";
+  spec.name = PROJECT_NAME;
   spec.vSync = false;
   spec.vkSetup.apiMajor = 1;
   spec.vkSetup.apiMinor = 3;

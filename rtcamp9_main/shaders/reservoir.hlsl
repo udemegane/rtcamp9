@@ -4,6 +4,10 @@
 
 static const uint Mcap = 20;
 
+float toScalar(float3 color)
+{
+    return dot(color, float3(0.299, 0.587, 0.114)); // luminance
+}
 struct RcVertex
 {
     float3 pos;
@@ -103,12 +107,15 @@ bool updateReservoir(inout Reservoir r, in Sample s_i, const float w_i, const fl
     r.M++;
     if (w_i == 0)
         return false;
-    r.w += w_i;
+    // float w_i = toScalar(s_i.radiance) / p_i;
+    // float w_current = toScalar(r.s.radiance) / r.p;
+    r.wSum += w_i;
 
     // Accept?
     if (r.w * u <= w_i)
     {
         r.s = s_i;
+        r.w = w_i;
         return true;
     }
     return false;
@@ -119,16 +126,42 @@ bool updateReservoir(inout Reservoir r, in Sample s_i, const float w_i, uint M, 
     r.M += M;
     if (w_i == 0)
         return false;
-    r.w += w_i;
+    // float w_i = toScalar(s_i.radiance) / p_i;
+    // float w_current = toScalar(r.s.radiance) / r.p;
+    r.wSum += w_i;
 
     // Accept?
     if (r.w * u <= w_i)
     {
         r.s = s_i;
+        r.w = w_i;
         return true;
     }
     return false;
 }
+
+// float updateReservoir(inout Reservoir r, in Sample s_i, const float p_i, float w, const float u)
+// {
+//     r.M++;
+//     if (p_i == 0)
+//         return 0.0f;
+//     float w_i = toScalar(s_i.radiance) / p_i;
+//     if (w_i != w)
+//         return -1;
+//     float correct_p_inv = r.p / toScalar(r.s.radiance);
+//     float w_current = toScalar(r.s.radiance) * correct_p_inv; // おかしい
+//     float tmp = toScalar(r.s.radiance) * r.p;
+//     r.wSum += w_i;
+
+//     // Accept?
+//     if (tmp * u <= w_i || r.M == 0)
+//     {
+//         r.s = s_i;
+//         r.p = w;
+//         return 1.0f;
+//     }
+//     return 0.0f;
+// }
 
 void capReservoir(inout Reservoir r)
 {

@@ -272,11 +272,12 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
 
     Reservoir res = initReservoir();
     Sample s;
+    uint seed2 = seed;
     bool isSampleReady = false;
-    float weight = 1.0f;
+    float pathAliveP = 1.0f;
     // uint initialSeed = seed;
     float3 sampleThp = float3(0.0f, 0.0f, 0.0f); // 最初はThp無効(0に何かけても0なので)
-
+    float3 LoCache = float3(0.0f, 0.0f, 0.0f);
     float3 thp_v0_to_vc = float3(0.0f, 0.0f, 0.0f); // 検証用 カメラからリコネクション点までのスループットをキャッシュする
 
     // Primary rayは発射済み
@@ -307,7 +308,8 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
         {
 
             float3 sky_color = float3(0.0, 0.0, 0.0); // Light blue grey
-            return radiance + (sky_color * throughput);
+            break;
+            // return radiance + (sky_color * throughput);
         }
 
         float3 lightPos = getRandomPosition(pushConst.light.position, pushConst.light.radius, float2(rand(seed), rand(seed)));
@@ -347,7 +349,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
         }
 
         float3 contrib = float3(0, 0, 0);
-        float3 Li = float3(0.0f, 0.0f, 0.0f);
+        float3 Lo = float3(0.0f, 0.0f, 0.0f);
 
         // Evaluation of direct light (sun)
         bool nextEventValid = (dot(L, payload.nrm) > 0.0f);
@@ -361,7 +363,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
             const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 1.0f) * 500.0) / (distanceToLight * distanceToLight);
             contrib += w * evalData.bsdf_diffuse;
             contrib += w * evalData.bsdf_glossy;
-            Li = contrib;
+            Lo = contrib;
             contrib *= throughput;
         }
 
@@ -390,7 +392,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
             break;             // paths with low throughput that won't contribute
         throughput /= rrPcont; // boost the energy of the non-terminated paths
         sampleThp /= rrPcont;
-        weight *= rrPcont;
+        pathAliveP *= rrPcont;
         // We are adding the contribution to the radiance only if the ray is not occluded by an object.
         if (nextEventValid /* && depth != 0*/)
         {
@@ -405,23 +407,44 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
                 // InitialSample s;
                 // s.radiance = contrib;
                 // s.f = contrib;
-                // updateReservoir(initRes, s, weight, rand(seed));
-
-                s.radiance = Li * sampleThp;
-                updateReservoir(res, s, weight, 1, rand(seed));
+                // updateReservoir(initRes, s, pathAliveP, rand(seed));
+                if (isSampleReady)
+                {
+                    s.radiance = contrib;
+                    float w = toScalar(s.radiance) / pathAliveP;
+                    updateReservoir(res, s, w, rand(seed2));
+                }
                 radiance += contrib;
             }
         }
     }
-    return radiance;
+
+    float3 thp2 = false ? sampleThp * thp_v0_to_vc : throughput;
+    float3 tmp = throughput;
+    // return radiance;
+    // return res.s.radiance;
+    // return throughput - thp_v0_to_vc;
+    if (all(tmp == throughput))
+    {
+        thp2 = float3(1.0f, 0.0f, 0.0f);
+    }
+    else
+    {
+        thp2 = float3(0.0f, 0.0f, 1.0f);
+    }
+    return thp2;
+
+    return res.s.radiance * calcContributionWegiht(res);
+
     packedReservoir[pixel1d] = pack(res);
+    // return (thp_v0_to_vc * res.s.radiance * calcContributionWegiht(res));
+
     // return initRes.wSum - radiance;
     float W = calcContributionWegiht(res);
 
     return float3(0.0f, 0.0f, 0.0f); // float3(W, W, W);
     // return res.s.radiance;
     // return thp_v0_to_vc;
-    // return (thp_v0_to_vc * res.s.radiance * calcContributionWegiht(res));
 }
 
 float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout uint seed, out uint initSeed, inout float3 throughput)
