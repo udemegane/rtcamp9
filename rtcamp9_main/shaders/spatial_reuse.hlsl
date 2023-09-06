@@ -77,26 +77,31 @@ float3 resamplePixel(float3 rayDir, inout uint seed, uint2 pixel, float2 launchS
             };
             uint neighbor1d = neighbor.x + launchSize.x * neighbor.y;
             Reservoir ri = unpack(packedInReservoir[neighbor1d]);
-            if (ri.s.k != 1)
-                continue;
-            float inv_p = ri.w / toScalar(ri.s.p_hat_xi);
+            // if (ri.s.k != 1)
+            // continue;
             Sample Ts;
             {
                 Ts.k = ri.s.k;
                 Ts.seed = ri.s.seed;
                 Ts.to = ri.s.to;
-                Ts.primId = ri.s.primId;
-
+                // Ts.primId = ri.s.primId;
+                // float jac =
                 Ts.p_hat_xi = ri.s.p_hat_cached * v1Thp; // TODO:
                 Ts.p_hat_cached = ri.s.p_hat_cached;
             }
-            float w = toScalar(Ts.p_hat_xi) * inv_p;
 
-            updateReservoir(centerRes, Ts, w, 0, rand(seed2));
+            float inv_p = ri.w / toScalar(ri.s.p_hat_xi);
+            float mi = (ri.w) / (ri.w + centerRes.wSum);
+            float w = mi * toScalar(Ts.p_hat_xi) * inv_p;
+            RcVertex from;
+            from.nrm = gbuf.nrm;
+            from.pos = gbuf.pos;
+            w *= calcJacobian(from, centerRes.s.to, ri.s.to);
+            updateReservoir(centerRes, Ts, w, ri.s.k == centerRes.s.k ? 0 : 1, rand(seed2));
         }
     }
 
-    // packedOutReservoir[pixel1d] = pack(centerRes);
+    packedOutReservoir[pixel1d] = pack(centerRes);
     return v1Thp;
 }
 
@@ -122,7 +127,13 @@ void main(uint3 groupId: SV_GroupID, uint3 groupThreadId: SV_GroupThreadID, uint
     const float4 target = mul(frameInfo.projInv, float4(d.x, d.y, 0.01, 1.0));
     float3 rayDir = mul(frameInfo.viewInv, float4(normalize(target.xyz), 0.0)).xyz;
 
-    float3 thp = resamplePixel(rayDir, seed, pixel, imgSize, pixel1d);
-    packedOutReservoir[pixel1d] = packedInReservoir[pixel1d];
-    thpOutImage[pixel] = float4(thp, 1.0f);
+    if (!USE_SPATIAL)
+    {
+        packedOutReservoir[pixel1d] = packedInReservoir[pixel1d];
+    }
+    else
+    {
+        float3 thp = resamplePixel(rayDir, seed, pixel, imgSize, pixel1d);
+        thpOutImage[pixel] = float4(thp, 1.0f);
+    }
 }

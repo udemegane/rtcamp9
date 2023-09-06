@@ -16,9 +16,9 @@ struct RcVertex
 // Sample for Path-Resampling
 struct Sample
 {
-    // RcVertex from; // Reconnection-able origin Vertex V_{k-1}
-    RcVertex to;         // Reconnection-able destination Vertex V_k
-    int primId;          //
+    RcVertex from; // Reconnection-able origin Vertex V_{k-1}
+    RcVertex to;   // Reconnection-able destination Vertex V_k
+    // int primId;          //
     float3 p_hat_xi;     // radiance of contribution from V_emit to V_0.
     float3 p_hat_cached; // cached radiance of contribution from V_emit to V_k
     uint k;              // Index of Reconnection-able Vertex
@@ -69,7 +69,9 @@ Reservoir initReservoir()
     s.k = 0;
     s.seed = 0;
     s.p_hat_xi = float3(0.0f, 0.0f, 0.0f);
-    s.primId = -1;
+    // s.primId = -1;
+    s.from.pos = float3(0.0f, 0.0f, 0.0f);
+    s.from.nrm = float3(1.0f, 0.0f, 0.0f);
     s.to.nrm = float3(1.0f, 0.0f, 0.0f);
     s.to.pos = float3(0.0f, 0.0f, 0.0f);
     r.s = s;
@@ -176,18 +178,15 @@ float calcContributionWegiht(Reservoir r)
     return p_hat == 0.0f ? 0.0f : (r.wSum / ((p_hat + FLT_EPSILON)));
 }
 
-float calcContributionWegihtGRIS(Reservoir r)
-{
-    float p_hat = length(r.s.p_hat_xi);
-    return p_hat == 0.0f ? 0.0f : (r.wSum / ((p_hat + FLT_EPSILON)));
-}
-
 // bool updateReservoir(inout DIReservoir r, in Sample)
 
-float calcJacobian(RcVertex from, RcVertex to)
+float calcJacobian(RcVertex from, RcVertex shiftTo, RcVertex orgTo)
 {
-
-    return 0.f;
+    float3 toShifted = shiftTo.pos - from.pos;
+    float3 toOrg = orgTo.pos - from.pos;
+    float norm2_shifted = dot(toShifted, toShifted);
+    float norm2_org = dot(toOrg, toOrg);
+    return (abs(dot(from.nrm, normalize(toShifted))) * norm2_org) / (abs(dot(from.nrm, normalize(toOrg))) * norm2_shifted);
 }
 
 // struct PackedReservoir
@@ -212,9 +211,11 @@ PackedReservoir pack(Reservoir r)
     PackedReservoir pr;
     pr.pos = r.s.to.pos;
     pr.nrm = r.s.to.nrm;
+    pr.fromnrm = r.s.from.nrm;
+    pr.frompos = r.s.from.pos;
     pr.rad = r.s.p_hat_xi;
     pr.radTmp = r.s.p_hat_cached;
-    pr.primId = r.s.primId;
+    // pr.primId = r.s.primId;
     pr.k = r.s.k;
     pr.seed = r.s.seed;
     pr.w = r.w;
@@ -229,9 +230,11 @@ Reservoir unpack(PackedReservoir pr)
     Reservoir r;
     r.s.to.pos = pr.pos;
     r.s.to.nrm = pr.nrm;
+    r.s.from.nrm = pr.fromnrm;
+    r.s.from.pos = pr.frompos;
     r.s.p_hat_xi = pr.rad;
     r.s.p_hat_cached = pr.radTmp;
-    r.s.primId = pr.primId;
+    // r.s.primId = pr.primId;
     r.s.k = pr.k;
     r.s.seed = pr.seed;
     r.w = pr.w;

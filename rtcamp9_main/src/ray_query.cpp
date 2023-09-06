@@ -714,7 +714,7 @@ private:
   void saveImage(nvvk::Buffer pixel_buffer, const std::string &outFilename)
   {
     std::filesystem::path path = std::filesystem::current_path();
-    auto filePath = path.parent_path().string() + "/" + outFilename;
+    auto filePath = path.string() + "/" + outFilename;
     // Write the buffer to disk
     LOGI(" - Size: %d, %d\n", m_gBuffers->getSize().width, m_gBuffers->getSize().height);
     LOGI(" - Bytes: %d\n", m_gBuffers->getSize().width * m_gBuffers->getSize().height * 4);
@@ -763,6 +763,7 @@ private:
     m_materials.push_back({{0.0, 0.0, 0.1}, 0.6f, 0.0f});     // mat black
     m_materials.push_back({{1.0, 1.0, 1.0}, 0.05f, 0.0f});    // White with reflection 6
     m_materials.push_back({{1.0, 1.0, 1.0}, 0.05f, 1.0f});    // Mirror
+    m_materials.push_back({{0.8, 0.7, 1.0}, 0.2f, 1.0f});     // Mirror
 
     m_meshes.emplace_back(nvh::createCube(2.8, 0.2, 6));
     m_meshes.emplace_back(nvh::createSphereUv(0.18f));
@@ -785,8 +786,24 @@ private:
     m_meshes.emplace_back(nvh::createCube(0.1, 60, 12)); // Panel 3 14
 
     m_meshes.emplace_back(nvh::createCube(0.1, 40, 30)); // Mirror1
-    m_meshes.emplace_back(nvh::createCube(0.1, 20, 15)); // Mirror 2
-    m_meshes.emplace_back(nvh::createCube(0.1, 40, 30)); // Mirror 3 17
+    // m_meshes.emplace_back(nvh::createCube(0.1, 20, 15)); // Mirror 2
+    // m_meshes.emplace_back(nvh::createCube(0.1, 40, 30)); // Mirror 3 17
+
+    // レ
+    m_meshes.emplace_back(nvh::createCube(1.0f, 5.0f, 1.0f)); // 16
+    m_meshes.emplace_back(nvh::createCube(1.0f, 5.5f, 1.0f)); // 17
+
+    // イ
+    m_meshes.emplace_back(nvh::createCube(1.0f, 3.0f, 1.0f)); // 18
+    m_meshes.emplace_back(nvh::createCube(1.0f, 6.0f, 1.0f)); //
+
+    // ト
+    m_meshes.emplace_back(nvh::createCube(1.0f, 5.0f, 1.0f)); // 20
+    m_meshes.emplace_back(nvh::createCube(1.0f, 6.0f, 1.0f)); //
+
+    // レ
+    m_meshes.emplace_back(nvh::createCube(1.0f, 5.0f, 1.0f)); // 22
+    m_meshes.emplace_back(nvh::createCube(1.0f, 6.0f, 1.0f)); //
 
     // Instance Cube
     {
@@ -922,6 +939,66 @@ private:
       n.rotation = nvmath::quatf(0.0f, 0.0f, 0.0f, 1.0f); // from
       // n.rotation = nvmath::quatf(0.707f, 0.0f, 0.0f, -0.707f); // to
     }
+
+    // 　レ
+    {
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 16;
+      n.material = 8;
+      n.translation = {23.0f, 3.2f, -2.0f};
+    }
+    {
+      auto &n = m_nodes.emplace_back();
+      n.mesh = 17;
+      n.material = 8;
+      n.translation = {23.0f, 1.6f, -0.0f};
+      n.rotation = nvmath::quatf(0.574f, 0.0f, 0.0f, 0.819f);
+    }
+
+    // // イ
+    // {
+    //   auto &n = m_nodes.emplace_back();
+    //   n.mesh = 18;
+    //   n.material = 8;
+    //   n.translation = {23.0f, 2.5f, -2.0f};
+    // }
+    // {
+    //   auto &n = m_nodes.emplace_back();
+    //   n.mesh = 19;
+    //   n.material = 8;
+    //   n.translation = {23.0f, 4.5f, -2.0f};
+    //   n.rotation = nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f);
+    // }
+
+    // // ト
+    // {
+    //   auto &n = m_nodes.emplace_back();
+    //   n.mesh = 20;
+    //   n.material = 8;
+    //   n.translation = {23.0f, 3.2f, 0.5f};
+    // }
+    // {
+    //   auto &n = m_nodes.emplace_back();
+    //   n.mesh = 21;
+    //   n.material = 8;
+    //   n.translation = {23.0f, 3.2f, 1.0f};
+    //   n.rotation = nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f);
+    // }
+
+    // // 　レ
+    // {
+    //   auto &n = m_nodes.emplace_back();
+    //   n.mesh = 22;
+    //   n.material = 8;
+    //   n.translation = {23.0f, 3.2f, 4.0f};
+    // }
+    // {
+    //   auto &n = m_nodes.emplace_back();
+    //   n.mesh = 23;
+    //   n.material = 8;
+    //   n.translation = {23.0f, 1.6f, 6.0f};
+    //   n.rotation = nvmath::quatf(0.500f, 0.0f, 0.0f, 0.866f);
+    // }
     // { // MIrror 2
     //   auto &n = m_nodes.emplace_back();
     //   n.mesh = 16;
@@ -947,7 +1024,7 @@ private:
     CameraManip.setClipPlanes({0.1F, 100.0F});
     CameraManip.setLookat({-15.0F, 4.33F, 0.0f}, {0.0F, 4.33F, 0.0F}, {0.0F, 1.0F, 0.0F});
     // Default parameters for overall material
-    m_pushConst.maxDepth = 20;
+    m_pushConst.maxDepth = 12;
     m_pushConst.frame = 0;
     m_pushConst.fireflyClampThreshold = 10;
     // m_pushConst.maxSamples = m_auto_render ? 30 : 30;
@@ -1227,10 +1304,15 @@ private:
     }
     m_frame++;
     m_subframe++;
+    float step = 0.15f;
+    if (m_anim_count > 105)
+    {
+      m_step *= 0.9;
+    }
     if (m_subframe > m_pushConst.maxSubframes)
     {
       m_subframe = 0;
-      m_xpos += 0.15f;
+      m_xpos += m_step;
     }
     m_temporalReservoirContainer.swap(m_spatialReservoirContainer);
     return true;
@@ -1334,7 +1416,8 @@ private:
   bool m_fullscreen = false;
   bool m_auto_render = false;
   uint m_anim_count = 0;
-  float m_speed = 2.0f;
+  float m_step = 0.0f; // 0.37f * 0.6f;
+  float m_speed = 1.5f;
   std::queue<std::thread> m_saveImageJobs;
 };
 

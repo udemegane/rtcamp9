@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// GGX実装したみたいなこと言ったかもしれませんがしてないです、サンプルから持ってきました
 
 #ifndef GGX_HLSLI
 #define GGX_HLSLI 1

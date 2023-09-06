@@ -273,7 +273,7 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
     Sample s;
     {
         s.k = 0;
-        s.primId = -1;
+        // s.primId = -1;
         s.p_hat_xi = float3(0.0f, 0.0f, 0.0f);
         s.seed = initSeed;
     }
@@ -344,7 +344,8 @@ float3 pathTrace(RayDesc ray, inout uint seed, uint initSeed, float3 throughput,
                 // radianceは最後までパスとレースしないとわからない
                 s.to.pos = payload.pos;
                 s.to.nrm = payload.nrm;
-                s.primId = payload.instanceIndex;
+
+                // s.primId = payload.instanceIndex;
                 s.k = depth;
                 s.seed = initSeed;
                 isSampleReady = true;
@@ -509,7 +510,7 @@ float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout ui
         evalData.k2 = L;
         bsdfEvaluate(evalData, pbrMat);
 
-        const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 0.5f, 0.5f) * 500.0) / (distanceToLight * distanceToLight);
+        const float3 w = (sceneDesc[0].light.intensity.xxx + float3(1.0f, 1.0f, 0.7f) * 150.0) / (distanceToLight * distanceToLight);
         contrib += w * evalData.bsdf_diffuse;
         contrib += w * evalData.bsdf_glossy;
         in_F = contrib;
@@ -534,9 +535,11 @@ float3 evaluatePrimaryHit(uint2 pixel, uint pixel1d, inout RayDesc ray, inout ui
         ray.Origin = offsetRay(payload.pos, payload.geonrm);
         ray.Direction = sampleData.k2;
     }
+    {
+    }
 
     // Russian-Roulette (minimizing live state)
-    float rrPcont = min(max(throughput.x, max(throughput.y, throughput.z)) + 0.001F, 0.95F);
+    float rrPcont = 1.0f; // min(max(throughput.x, max(throughput.y, throughput.z)) + 0.001F, 0.95F);
     if (rand(seed) >= rrPcont)
         return radiance;
     // break;             // paths with low throughput that won't contribute
@@ -590,7 +593,7 @@ float3 samplePixel(inout uint seed, float2 launchID, float2 launchSize, inout Re
     float3 gi_radiance = pathTrace(ray, seed, initSeed, thp, pixel1d, res);
     float3 radiance = gi_radiance;
 
-    // outImage[launchID] = float4(di_radiance, 1.0f);
+    outImage[launchID] = float4(di_radiance, 1.0f);
     // Removing fireflies
     float lum = dot(radiance, float3(0.212671F, 0.715160F, 0.072169F));
     if (lum > pushConst.fireflyClampThreshold)
@@ -629,12 +632,15 @@ void computeMain(uint3 threadIdx: SV_DispatchThreadID)
     }
     packedReservoir[pixel1d] = pack(res);
 
-    pixel_color /= pushConst.maxSamples;
+    // pixel_color /= pushConst.maxSamples;
     bool first_frame = (pushConst.frame == 0);
     // Saving result
     if (true)
-    {                                                // First frame, replace the value in the buffer
-        diReservoir[pixel1d].radiance = pixel_color; // gbuffer1d[pixel1d].nrm; // pixel_color;
+    { // First frame, replace the value in the buffer
+        diReservoir[pixel1d].radiance = pixel_color;
+        // diReservoir[pixel1d].radiance = res.s.p_hat_xi * calcContributionWegiht(res);
+        // gbuffer1d[pixel1d].nrm; // pixel_color;
+        // diReservoir[pixel1d].radiance = float3(0.0f, 0.0f, 0.0f); // gbuffer1d[pixel1d].nrm; // pixel_color;
         // diReservoir[pixel1d].radiance = gbuffer1d[pixel1d].matId; // pixel_color;
     }
     else
